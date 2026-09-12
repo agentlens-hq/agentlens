@@ -3,687 +3,843 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>AgentLens — When your AI agent breaks, this tells you why</title>
-  <meta name="description" content="AgentLens tells you exactly which decision broke your AI agent and what to change. Works with Anthropic, OpenAI, LangGraph — and any framework built on them. Two lines to install." />
-  <meta property="og:title" content="AgentLens — When your AI agent breaks, this tells you why" />
-  <meta property="og:description" content="Not logs. Not traces. The answer. Works with Anthropic, OpenAI, LangGraph — and any framework built on them." />
+  <title>AgentLens — When your AI agent breaks, find exactly why</title>
+  <meta name="description" content="AgentLens is a local-first debugger for AI agents. Not logs, not traces — the answer: root cause, the exact failed step, why, the fix, confidence, and wasted-token cost. Works with Anthropic, OpenAI, LangGraph and any framework built on them." />
+  <meta name="theme-color" content="#0a0a0c" />
+  <link rel="canonical" href="https://agentlens.run" />
+  <meta property="og:type" content="website" />
+  <meta property="og:site_name" content="AgentLens" />
+  <meta property="og:title" content="AgentLens — When your AI agent breaks, find exactly why" />
+  <meta property="og:description" content="Not logs. Not traces. The answer. Root cause, failed step, the fix, confidence, and cost — for AI agent failures. Local-first, open source." />
   <meta property="og:url" content="https://agentlens.run" />
   <meta name="twitter:card" content="summary_large_image" />
-  <meta name="twitter:title" content="AgentLens — When your AI agent breaks, this tells you why" />
-  <meta name="twitter:description" content="Not logs. Not traces. The answer. Works with Anthropic, OpenAI, LangGraph — and any framework built on them." />
-  <link rel="canonical" href="https://agentlens.run" />
+  <meta name="twitter:title" content="AgentLens — When your AI agent breaks, find exactly why" />
+  <meta name="twitter:description" content="Not logs. Not traces. The answer. A local-first debugger for AI agents." />
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%230a0a0c'/%3E%3Ccircle cx='16' cy='16' r='8' fill='none' stroke='%237c8cff' stroke-width='2.5'/%3E%3Ccircle cx='16' cy='16' r='3' fill='%237c8cff'/%3E%3C/svg%3E" />
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600;700&display=swap">
+  <script type="application/ld+json">
+  {"@context":"https://schema.org","@type":"SoftwareApplication","name":"AgentLens","applicationCategory":"DeveloperApplication","operatingSystem":"Cross-platform","description":"A local-first debugger for AI agents that reports the root cause, exact failed step, fix, confidence and wasted-token cost of agent failures.","offers":{"@type":"Offer","price":"0","priceCurrency":"USD"},"url":"https://agentlens.run"}
+  </script>
   <style>
-    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+    :root{
+      --bg:#0A0A0C; --bg2:#0E0E12; --panel:#111118; --raise:#16161E;
+      --line:#20212B; --line2:#2A2B37; --line-soft:#191A22;
+      --text:#ECECEF; --dim:#9B9CA8; --faint:#63646F;
+      --iris:#7C8CFF; --iris-dim:#3B3F66; --iris-soft:#14152400;
+      --ok:#3FB950; --warn:#E3B341; --bad:#F26D6D; --violet:#B08CFF;
+      --mono:'JetBrains Mono',ui-monospace,SFMono-Regular,Menlo,monospace;
+      --sans:'Inter',system-ui,-apple-system,Segoe UI,sans-serif;
+      --maxw:1160px; --nav-h:60px;
+      color-scheme:dark;
+    }
+    html{scroll-behavior:smooth;-webkit-text-size-adjust:100%}
+    body{background:var(--bg);color:var(--text);font-family:var(--sans);font-size:15.5px;line-height:1.6;
+      -webkit-font-smoothing:antialiased;overflow-x:hidden}
+    a{color:inherit;text-decoration:none}
+    ::selection{background:rgba(124,140,255,.3)}
+    :focus-visible{outline:2px solid var(--iris);outline-offset:2px;border-radius:5px}
+    .wrap{max-width:var(--maxw);margin:0 auto;padding:0 24px}
+    .mono{font-family:var(--mono)}
+    .kick{font-family:var(--mono);font-size:12px;letter-spacing:.14em;text-transform:uppercase;color:var(--iris)}
+    h1,h2,h3{letter-spacing:-.03em;font-weight:700;text-wrap:balance;line-height:1.05}
+    section{position:relative;padding:96px 0;border-top:1px solid var(--line-soft)}
+    .sec-head{max-width:60ch}
+    .sec-head h2{font-size:clamp(28px,4vw,40px);margin-top:14px}
+    .sec-head p{color:var(--dim);font-size:17.5px;margin-top:14px;max-width:56ch}
 
-    :root {
-      --bg:        #0d0d0d;
-      --bg2:       #111111;
-      --bg3:       #161616;
-      --border:    #222222;
-      --border2:   #2a2a2a;
-      --green:     #22c55e;
-      --green-dim: #16a34a;
-      --amber:     #f59e0b;
-      --red:       #ef4444;
-      --blue:      #3b82f6;
-      --text:      #e5e5e5;
-      --text2:     #a3a3a3;
-      --text3:     #525252;
-      --mono:      'JetBrains Mono', 'Fira Code', 'Cascadia Code', monospace;
-      --sans:      -apple-system, BlinkMacSystemFont, 'Inter', 'Segoe UI', sans-serif;
-    }
+    /* buttons */
+    .btn{display:inline-flex;align-items:center;gap:9px;font-family:var(--sans);font-size:14.5px;font-weight:600;
+      border-radius:9px;padding:10px 17px;cursor:pointer;border:1px solid transparent;transition:.15s;white-space:nowrap}
+    .btn svg{flex:none}
+    .btn-primary{background:var(--iris);color:#0A0A0C;border-color:var(--iris)}
+    .btn-primary:hover{filter:brightness(1.1);transform:translateY(-1px)}
+    .btn-ghost{background:var(--panel);color:var(--text);border-color:var(--line2)}
+    .btn-ghost:hover{border-color:var(--dim)}
+    .btn-lg{padding:13px 22px;font-size:15px}
 
-    html { scroll-behavior: smooth; }
-
-    body {
-      background: var(--bg);
-      color: var(--text);
-      font-family: var(--sans);
-      font-size: 15px;
-      line-height: 1.6;
-      -webkit-font-smoothing: antialiased;
-    }
-
-    a { color: var(--green); text-decoration: none; }
-    a:hover { text-decoration: underline; }
-
-    /* ── NAV ── */
-    nav {
-      position: sticky; top: 0; z-index: 100;
-      background: rgba(13,13,13,0.92);
-      backdrop-filter: blur(12px);
-      border-bottom: 1px solid var(--border);
-      padding: 0 24px;
-      height: 52px;
-      display: flex; align-items: center; justify-content: space-between;
-    }
-    .nav-logo {
-      font-family: var(--mono);
-      font-size: 15px;
-      font-weight: 600;
-      color: var(--green);
-      letter-spacing: -0.02em;
-    }
-    .nav-logo span { color: var(--text2); }
-    .nav-links { display: flex; gap: 24px; align-items: center; }
-    .nav-links a { color: var(--text2); font-size: 13px; }
-    .nav-links a:hover { color: var(--text); text-decoration: none; }
-    .nav-gh {
-      display: flex; align-items: center; gap: 6px;
-      background: var(--bg3);
-      border: 1px solid var(--border2);
-      border-radius: 6px;
-      padding: 5px 12px;
-      font-size: 12px;
-      color: var(--text) !important;
-      font-family: var(--mono);
-    }
-    .nav-gh:hover { border-color: var(--green); text-decoration: none !important; }
-
-    /* ── SECTIONS ── */
-    section { max-width: 900px; margin: 0 auto; padding: 80px 24px; }
-    section.wide { max-width: 1100px; }
-    section.tight { padding: 48px 24px; }
-
-    /* ── HERO ── */
-    .hero { padding-top: 96px; padding-bottom: 64px; text-align: center; }
-    .hero-badge {
-      display: inline-flex; align-items: center; gap: 6px;
-      background: rgba(34,197,94,0.08);
-      border: 1px solid rgba(34,197,94,0.2);
-      border-radius: 20px;
-      padding: 4px 12px;
-      font-size: 12px;
-      font-family: var(--mono);
-      color: var(--green);
-      margin-bottom: 28px;
-    }
-    .hero-badge::before { content: '●'; font-size: 8px; }
-    h1 {
-      font-size: clamp(28px, 5vw, 52px);
-      font-weight: 700;
-      letter-spacing: -0.03em;
-      line-height: 1.12;
-      margin-bottom: 20px;
-      color: #f5f5f5;
-    }
-    h1 em { font-style: normal; color: var(--green); }
-    .hero-sub {
-      font-size: clamp(15px, 2vw, 18px);
-      color: var(--text2);
-      max-width: 560px;
-      margin: 0 auto 36px;
-      line-height: 1.6;
-    }
-    .hero-sub strong { color: var(--text); }
-
-    /* ── INSTALL BLOCK ── */
-    .install-wrap {
-      display: inline-flex;
-      align-items: center;
-      gap: 0;
-      background: var(--bg3);
-      border: 1px solid var(--border2);
-      border-radius: 8px;
-      overflow: hidden;
-      margin-bottom: 16px;
-    }
-    .install-prompt {
-      padding: 10px 14px;
-      font-family: var(--mono);
-      font-size: 14px;
-      color: var(--green);
-      border-right: 1px solid var(--border2);
-      user-select: none;
-    }
-    .install-cmd {
-      padding: 10px 16px;
-      font-family: var(--mono);
-      font-size: 14px;
-      color: var(--text);
-      cursor: pointer;
-    }
-    .copy-btn {
-      padding: 10px 14px;
-      background: none;
-      border: none;
-      border-left: 1px solid var(--border2);
-      color: var(--text3);
-      cursor: pointer;
-      font-size: 13px;
-      transition: color 0.15s;
-    }
-    .copy-btn:hover { color: var(--green); }
-    .hero-note { font-size: 12px; color: var(--text3); font-family: var(--mono); }
-
-    /* ── FRAMEWORKS ── */
-    .frameworks {
-      display: flex; flex-wrap: wrap; gap: 8px;
-      justify-content: center;
-      margin-top: 40px;
-    }
-    .fw-tag {
-      background: var(--bg3);
-      border: 1px solid var(--border);
-      border-radius: 6px;
-      padding: 5px 12px;
-      font-size: 12px;
-      font-family: var(--mono);
-      color: var(--text2);
-    }
-    .fw-native {
-      color: var(--green);
-      border-color: rgba(34,197,94,0.3);
-    }
-    .fw-note {
-      margin-top: 12px;
-      text-align: center;
-      font-size: 11px;
-      font-family: var(--mono);
-      color: var(--text3);
+    /* NAV */
+    nav{position:sticky;top:0;z-index:100;height:var(--nav-h);display:flex;align-items:center;
+      border-bottom:1px solid transparent;transition:background .2s,border-color .2s}
+    nav.scrolled{background:rgba(10,10,12,.8);backdrop-filter:blur(14px);border-bottom-color:var(--line)}
+    .nav-in{display:flex;align-items:center;gap:26px;width:100%}
+    .logo{display:flex;align-items:center;gap:9px;font-weight:700;font-size:16px;letter-spacing:-.02em}
+    .logo .m{width:22px;height:22px;flex:none}
+    .nav-links{display:flex;gap:24px;margin-left:8px;font-size:14px;color:var(--dim)}
+    .nav-links a:hover{color:var(--text)}
+    .nav-right{margin-left:auto;display:flex;align-items:center;gap:14px}
+    .gh{display:flex;align-items:center;gap:7px;font-size:14px;color:var(--dim)}
+    .gh:hover{color:var(--text)}
+    .menu-btn{display:none;background:none;border:1px solid var(--line2);border-radius:8px;padding:7px;color:var(--text);cursor:pointer}
+    .mobile-menu{display:none}
+    @media(max-width:860px){
+      .nav-links,.nav-right .gh,.nav-right .btn{display:none}
+      .menu-btn{display:inline-flex}
+      .mobile-menu{display:block;position:fixed;inset:var(--nav-h) 0 auto 0;z-index:99;background:var(--bg2);
+        border-bottom:1px solid var(--line);padding:16px 24px 22px;transform:translateY(-8px);opacity:0;pointer-events:none;transition:.2s}
+      .mobile-menu.open{transform:none;opacity:1;pointer-events:auto}
+      .mobile-menu a{display:block;padding:12px 0;color:var(--dim);border-bottom:1px solid var(--line-soft);font-size:15px}
+      .mobile-menu .btn{display:inline-flex;margin-top:16px;width:100%;justify-content:center}
     }
 
-    /* ── TERMINAL DEMO ── */
-    .terminal {
-      background: #0a0a0a;
-      border: 1px solid var(--border2);
-      border-radius: 10px;
-      overflow: hidden;
-      font-family: var(--mono);
-      font-size: 13px;
-      line-height: 1.7;
-    }
-    .term-bar {
-      background: #161616;
-      padding: 10px 16px;
-      display: flex; align-items: center; gap: 8px;
-      border-bottom: 1px solid var(--border);
-    }
-    .dot { width: 10px; height: 10px; border-radius: 50%; }
-    .dot-r { background: #ff5f57; }
-    .dot-y { background: #febc2e; }
-    .dot-g { background: #28c840; }
-    .term-title { flex: 1; text-align: center; font-size: 11px; color: var(--text3); }
-    .term-body { padding: 20px 24px; }
-    .term-body p { margin: 0; white-space: pre-wrap; }
-    .t-prompt { color: var(--green); }
-    .t-cmd { color: var(--text); }
-    .t-dim { color: var(--text3); }
-    .t-out { color: var(--text2); }
-    .t-section { color: var(--amber); font-weight: 600; }
-    .t-val { color: #a78bfa; }
-    .t-good { color: var(--green); }
-    .t-bad  { color: var(--red); }
-    .t-warn { color: var(--amber); }
-    .t-gap  { display: block; height: 8px; }
+    /* backdrop grid */
+    .grid-bg{position:absolute;inset:0;z-index:-1;pointer-events:none;
+      background-image:linear-gradient(var(--line-soft) 1px,transparent 1px),linear-gradient(90deg,var(--line-soft) 1px,transparent 1px);
+      background-size:56px 56px;
+      -webkit-mask-image:radial-gradient(120% 70% at 50% 0%,#000,transparent 72%);mask-image:radial-gradient(120% 70% at 50% 0%,#000,transparent 72%);
+      opacity:.5}
 
-    /* ── SECTION HEADERS ── */
-    .section-label {
-      font-family: var(--mono);
-      font-size: 11px;
-      color: var(--green);
-      letter-spacing: 0.1em;
-      text-transform: uppercase;
-      margin-bottom: 12px;
-    }
-    h2 {
-      font-size: clamp(22px, 3vw, 32px);
-      font-weight: 700;
-      letter-spacing: -0.025em;
-      margin-bottom: 14px;
-      color: #f5f5f5;
-    }
-    .sub { color: var(--text2); max-width: 560px; margin-bottom: 40px; line-height: 1.6; }
+    /* HERO */
+    .hero{padding:72px 0 84px;position:relative;overflow:hidden}
+    .hero-grid{display:grid;grid-template-columns:1.04fr .96fr;gap:56px;align-items:center}
+    @media(max-width:940px){.hero-grid{grid-template-columns:1fr;gap:40px}}
+    .badge{display:inline-flex;align-items:center;gap:9px;font-family:var(--mono);font-size:12px;color:var(--dim);
+      background:var(--panel);border:1px solid var(--line);border-radius:999px;padding:6px 13px}
+    .badge .d{width:6px;height:6px;border-radius:50%;background:var(--ok);box-shadow:0 0 7px var(--ok)}
+    h1.hero-h{font-size:clamp(38px,5.6vw,60px);margin:22px 0 0;font-weight:800}
+    .hero-h .g{color:var(--dim);font-weight:700}
+    .answer{margin-top:20px;font-family:var(--mono);font-size:15px;color:var(--dim);display:flex;gap:10px;flex-wrap:wrap}
+    .answer b{color:var(--text);font-weight:500}
+    .answer .sep{color:var(--iris-dim)}
+    .hero p.sub{color:var(--dim);font-size:18px;margin-top:22px;max-width:50ch}
+    .cmd{display:flex;align-items:center;gap:12px;margin-top:26px;font-family:var(--mono);font-size:14.5px;
+      background:var(--panel);border:1px solid var(--line2);border-radius:10px;padding:12px 14px;max-width:360px}
+    .cmd .pr{color:var(--iris)}
+    .cmd .txt{color:var(--text)}
+    .cmd button{margin-left:auto;background:none;border:0;color:var(--faint);cursor:pointer;font-family:var(--mono);font-size:12px;transition:.15s;display:flex;gap:6px;align-items:center}
+    .cmd button:hover{color:var(--iris)}
+    .hero-cta{display:flex;gap:12px;flex-wrap:wrap;margin-top:22px}
+    .hero-note{margin-top:22px;font-family:var(--mono);font-size:12.5px;color:var(--faint)}
 
-    /* ── HOW IT WORKS ── */
-    .steps { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 20px; }
-    .step {
-      background: var(--bg3);
-      border: 1px solid var(--border);
-      border-radius: 10px;
-      padding: 24px;
-    }
-    .step-num {
-      font-family: var(--mono);
-      font-size: 11px;
-      color: var(--green);
-      margin-bottom: 10px;
-    }
-    .step h3 { font-size: 15px; font-weight: 600; margin-bottom: 8px; color: var(--text); }
-    .step p { font-size: 13px; color: var(--text2); line-height: 1.6; }
-    .step code {
-      font-family: var(--mono);
-      font-size: 12px;
-      background: var(--bg);
-      border: 1px solid var(--border);
-      border-radius: 4px;
-      padding: 2px 6px;
-      color: var(--green);
-    }
+    /* diagnosis console (hero right) */
+    .console{background:linear-gradient(180deg,#0e0e15,#0b0b11);border:1px solid var(--line2);border-radius:14px;
+      overflow:hidden;font-family:var(--mono);box-shadow:0 30px 80px -40px rgba(0,0,0,.9),0 0 0 1px rgba(124,140,255,.05);position:relative}
+    .console .bar{display:flex;align-items:center;gap:7px;padding:11px 14px;border-bottom:1px solid var(--line-soft);background:rgba(255,255,255,.015)}
+    .console .bar .c{width:11px;height:11px;border-radius:50%}
+    .console .bar .t{margin-left:10px;font-size:12px;color:var(--faint)}
+    .console .bar .t b{color:var(--dim);font-weight:500}
+    .console-body{padding:16px 16px 18px;min-height:392px;font-size:13px;line-height:1.7}
+    .tstep{display:flex;align-items:center;gap:10px;padding:5px 0;color:var(--dim);opacity:.35;transition:opacity .3s,color .3s}
+    .tstep.on{opacity:1}
+    .tstep .n{color:var(--faint);width:24px;flex:none}
+    .tstep .ic{width:14px;height:14px;flex:none;border-radius:3px;border:1.5px solid var(--faint)}
+    .tstep.run .ic{border-color:var(--iris);background:var(--iris)}
+    .tstep.done .ic{border-color:var(--ok);background:var(--ok)}
+    .tstep.failed{color:var(--bad);opacity:1}
+    .tstep.failed .ic{border-color:var(--bad);background:var(--bad)}
+    .tstep .tool{color:var(--violet)}
+    .tstep.failed .tool{color:var(--bad)}
+    .tstep .flag{margin-left:auto;font-size:11px;color:var(--bad)}
+    .scanline{height:1px;background:linear-gradient(90deg,transparent,var(--iris),transparent);margin:10px 0;opacity:0;transition:opacity .2s}
+    .scanline.on{opacity:1;animation:scan 1.1s ease-in-out}
+    @keyframes scan{0%{transform:translateY(-120px);opacity:0}30%{opacity:1}100%{transform:translateY(0);opacity:.6}}
+    .diag{border-top:1px dashed var(--line2);margin-top:8px;padding-top:12px;opacity:0;transform:translateY(6px);transition:.4s}
+    .diag.on{opacity:1;transform:none}
+    .diag .vr{display:flex;align-items:center;justify-content:space-between;margin-bottom:12px}
+    .vpill{display:inline-flex;align-items:center;gap:7px;font-size:12px;padding:4px 11px;border-radius:999px;
+      color:#ffbcbc;background:rgba(242,109,109,.12);border:1px solid rgba(242,109,109,.34)}
+    .vpill .d{width:6px;height:6px;border-radius:50%;background:var(--bad)}
+    .drow{display:grid;grid-template-columns:88px 1fr;gap:12px;padding:4px 0}
+    .drow .k{color:var(--faint);text-transform:lowercase}
+    .drow .v{color:var(--text)} .drow .v .rc{color:var(--bad);font-weight:700} .drow .v em{color:var(--iris);font-style:normal}
+    .diag .imp{margin-top:10px;padding-top:10px;border-top:1px dashed var(--line2);color:var(--dim);font-size:12px}
+    .diag .imp b{color:var(--warn)}
+    .replay{position:absolute;top:11px;right:12px;font-family:var(--mono);font-size:11px;color:var(--faint);background:none;border:1px solid var(--line2);border-radius:7px;padding:4px 9px;cursor:pointer;transition:.15s;z-index:2}
+    .replay:hover{color:var(--iris);border-color:var(--iris-dim)}
 
-    /* ── FAILURE CARDS ── */
-    .failures { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 16px; }
-    .fail-card {
-      background: var(--bg3);
-      border: 1px solid var(--border);
-      border-radius: 10px;
-      padding: 20px;
-      position: relative;
-      overflow: hidden;
-    }
-    .fail-card::before {
-      content: '';
-      position: absolute; left: 0; top: 0; bottom: 0;
-      width: 3px;
-      background: var(--green);
-    }
-    .fail-tag {
-      font-family: var(--mono);
-      font-size: 11px;
-      color: var(--green);
-      margin-bottom: 8px;
-      display: block;
-    }
-    .fail-card h3 { font-size: 14px; font-weight: 600; margin-bottom: 6px; }
-    .fail-card p { font-size: 12px; color: var(--text2); line-height: 1.5; }
+    /* logo strip */
+    .strip{padding:26px 0;border-top:1px solid var(--line-soft);border-bottom:1px solid var(--line-soft);background:var(--bg2)}
+    .strip-in{display:flex;align-items:center;justify-content:center;gap:14px 38px;flex-wrap:wrap}
+    .strip .lab{font-family:var(--mono);font-size:11.5px;letter-spacing:.1em;text-transform:uppercase;color:var(--faint)}
+    .strip .co{font-weight:600;font-size:15px;color:var(--dim)}
 
-    /* ── CODE BLOCK ── */
-    .code-block {
-      background: #0a0a0a;
-      border: 1px solid var(--border2);
-      border-radius: 10px;
-      overflow: hidden;
-    }
-    .code-header {
-      background: var(--bg3);
-      padding: 10px 16px;
-      display: flex; justify-content: space-between; align-items: center;
-      border-bottom: 1px solid var(--border);
-      font-family: var(--mono);
-      font-size: 12px;
-      color: var(--text3);
-    }
-    .code-lang { color: var(--green); }
-    pre {
-      padding: 20px 24px;
-      font-family: var(--mono);
-      font-size: 13px;
-      line-height: 1.7;
-      overflow-x: auto;
-      color: var(--text);
-    }
-    .kw  { color: #c084fc; }
-    .fn  { color: #60a5fa; }
-    .str { color: #86efac; }
-    .cm  { color: var(--text3); font-style: italic; }
-    .dec { color: var(--amber); }
+    /* comparison */
+    .cmp{display:grid;grid-template-columns:1fr 1fr;gap:20px;margin-top:44px}
+    @media(max-width:760px){.cmp{grid-template-columns:1fr}}
+    .cmp-card{border:1px solid var(--line);border-radius:14px;padding:24px;background:var(--panel)}
+    .cmp-card h3{font-family:var(--mono);font-size:13px;letter-spacing:.05em;text-transform:uppercase;color:var(--faint);font-weight:600}
+    .cmp-card.you h3{color:var(--iris)}
+    .cmp-list{margin-top:16px;font-family:var(--mono);font-size:13px;line-height:2.05;color:var(--dim)}
+    .cmp-list .mut{color:var(--faint)}
+    .cmp-card.you .cmp-list{color:var(--text)}
+    .cmp-card.you .cmp-list .rc{color:var(--bad);font-weight:700}
+    .cmp-card.you .cmp-list .ar{color:var(--iris)}
+    .cmp-tag{display:inline-block;margin-top:18px;font-size:12.5px;color:var(--faint)}
+    .cmp-card.you .cmp-tag{color:var(--dim)}
 
-    /* ── DIAGNOSIS EXAMPLES ── */
-    .diag-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 16px; }
-    .diag-card {
-      background: #0a0a0a;
-      border: 1px solid var(--border2);
-      border-radius: 10px;
-      overflow: hidden;
-      font-family: var(--mono);
-      font-size: 12px;
-    }
-    .diag-header {
-      background: var(--bg3);
-      padding: 10px 16px;
-      border-bottom: 1px solid var(--border);
-      display: flex; justify-content: space-between; align-items: center;
-    }
-    .diag-fw { font-size: 11px; color: var(--text3); }
-    .diag-cat { color: var(--amber); font-weight: 600; font-size: 11px; }
-    .diag-body { padding: 16px; line-height: 1.8; }
-    .diag-label { color: var(--text3); }
-    .diag-val { color: var(--text); }
-    .diag-fix { color: var(--text2); font-size: 11px; margin-top: 10px; line-height: 1.5; }
-    .diag-conf { margin-top: 10px; }
-    .conf-bar-wrap { background: var(--border); border-radius: 2px; height: 3px; margin-top: 4px; }
-    .conf-bar { height: 3px; border-radius: 2px; background: var(--green); }
+    /* debugger (failure categories) */
+    .dbg{display:grid;grid-template-columns:230px 1fr 1fr;gap:16px;margin-top:44px;align-items:stretch}
+    @media(max-width:900px){.dbg{grid-template-columns:1fr;}}
+    .cat-list{display:flex;flex-direction:column;gap:6px}
+    @media(max-width:900px){.cat-list{flex-direction:row;overflow-x:auto;gap:8px;padding-bottom:4px}}
+    .cat{display:flex;flex-direction:column;gap:3px;text-align:left;background:var(--panel);border:1px solid var(--line);border-radius:10px;
+      padding:12px 14px;cursor:pointer;transition:.15s;font-family:inherit;color:var(--text);white-space:nowrap}
+    .cat:hover{border-color:var(--line2)}
+    .cat.active{border-color:var(--iris);background:var(--raise)}
+    .cat .nm{font-family:var(--mono);font-size:13px}
+    .cat.active .nm{color:var(--iris)}
+    .cat .ds{font-size:12px;color:var(--faint)}
+    @media(max-width:900px){.cat .ds{display:none}}
+    .dbg-panel{background:var(--panel);border:1px solid var(--line);border-radius:12px;overflow:hidden;font-family:var(--mono);min-height:260px}
+    .dbg-panel .ph{padding:11px 14px;border-bottom:1px solid var(--line-soft);font-size:11.5px;color:var(--faint);text-transform:uppercase;letter-spacing:.08em}
+    .dbg-trace{padding:12px 14px;font-size:12.5px;line-height:1.95}
+    .dbg-trace .ln{display:flex;gap:10px;color:var(--dim)}
+    .dbg-trace .ln .n{color:var(--faint);width:20px;flex:none}
+    .dbg-trace .ln.bad{color:var(--bad)}
+    .dbg-trace .ln .tl{color:var(--violet)} .dbg-trace .ln.bad .tl{color:var(--bad)}
+    .dbg-diag{padding:14px}
+    .dbg-diag .vpill{margin-bottom:12px}
+    .dbg-diag .drow{grid-template-columns:74px 1fr}
+    .dbg-diag .imp{margin-top:10px;padding-top:10px;border-top:1px dashed var(--line2);color:var(--dim);font-size:12px}
+    .dbg-diag .imp b{color:var(--warn)}
 
-    /* ── FOOTER ── */
-    footer {
-      border-top: 1px solid var(--border);
-      padding: 32px 24px;
-      text-align: center;
-      font-size: 12px;
-      color: var(--text3);
-      font-family: var(--mono);
-    }
-    footer a { color: var(--text2); }
+    /* demo */
+    .demo{background:var(--panel);border:1px solid var(--line2);border-radius:16px;overflow:hidden;margin-top:40px}
+    .demo-top{display:flex;align-items:center;gap:12px;padding:14px 18px;border-bottom:1px solid var(--line-soft);flex-wrap:wrap}
+    .demo-top .ttl{font-family:var(--mono);font-size:13px;color:var(--dim)}
+    .demo-top .acts{margin-left:auto;display:flex;gap:10px}
+    .demo-grid{display:grid;grid-template-columns:1fr 1.2fr;gap:0}
+    @media(max-width:820px){.demo-grid{grid-template-columns:1fr}}
+    .flow{padding:26px 22px;border-right:1px solid var(--line-soft);display:flex;flex-direction:column;gap:0;align-items:center;justify-content:center;min-height:340px}
+    @media(max-width:820px){.flow{border-right:0;border-bottom:1px solid var(--line-soft)}}
+    .node{font-family:var(--mono);font-size:13px;border:1px solid var(--line2);border-radius:9px;padding:9px 16px;color:var(--dim);
+      background:var(--bg2);transition:.3s;min-width:150px;text-align:center;position:relative}
+    .node .sub{display:block;font-size:11px;color:var(--faint)}
+    .node.run{border-color:var(--iris);color:var(--text);box-shadow:0 0 0 1px var(--iris-dim)}
+    .node.done{border-color:var(--ok);color:var(--text)}
+    .node.done .sub{color:var(--ok)}
+    .node.failed{border-color:var(--bad);color:#ffbcbc;background:rgba(242,109,109,.06)}
+    .node.failed .sub{color:var(--bad)}
+    .edge{width:1px;height:20px;background:var(--line2);transition:.3s}
+    .edge.on{background:var(--iris)} .edge.bad{background:var(--bad)}
+    .demo-out{padding:18px;font-family:var(--mono);font-size:13px;min-height:340px;display:flex;flex-direction:column}
+    .demo-out .placeholder{margin:auto;text-align:center;color:var(--faint);font-size:12.5px;line-height:1.7}
+    .demo-log{font-size:12px;color:var(--dim);line-height:1.9}
+    .demo-log .l{opacity:0;transform:translateY(3px);transition:.25s}
+    .demo-log .l.on{opacity:1;transform:none}
+    .demo-log .ok{color:var(--ok)} .demo-log .bad{color:var(--bad)} .demo-log .mut{color:var(--faint)}
 
-    /* ── DIVIDER ── */
-    .divider { border: none; border-top: 1px solid var(--border); }
+    /* steps */
+    .steps{display:grid;grid-template-columns:repeat(3,1fr);gap:18px;margin-top:44px}
+    @media(max-width:820px){.steps{grid-template-columns:1fr}}
+    .step{border:1px solid var(--line);border-radius:14px;background:var(--panel);overflow:hidden}
+    .step .sh{display:flex;align-items:center;gap:12px;padding:18px 20px 0}
+    .step .num{font-family:var(--mono);font-size:12px;color:var(--iris);border:1px solid var(--iris-dim);border-radius:7px;padding:4px 9px}
+    .step h3{font-size:17px;letter-spacing:-.01em}
+    .step p{color:var(--dim);font-size:14px;padding:8px 20px 0}
+    .step .code{margin:16px 20px 20px;background:var(--bg);border:1px solid var(--line-soft);border-radius:9px;padding:12px 13px;
+      font-family:var(--mono);font-size:12.5px;color:var(--text);overflow-x:auto;position:relative}
+    .step .code .cp{position:absolute;top:8px;right:9px;background:none;border:0;color:var(--faint);cursor:pointer;font-size:11px;font-family:var(--mono)}
+    .step .code .cp:hover{color:var(--iris)}
+    .code .kw{color:var(--iris)} .code .fn{color:var(--violet)} .code .st{color:var(--ok)} .code .cm{color:var(--faint)}
 
-    @media (max-width: 600px) {
-      .nav-links { display: none; }
-      .term-body { font-size: 11px; padding: 14px 16px; }
-      pre { font-size: 11px; }
-    }
+    /* terminal tabs (install + cli) */
+    .termbox{background:linear-gradient(180deg,#0e0e15,#0b0b11);border:1px solid var(--line2);border-radius:14px;overflow:hidden;margin-top:40px}
+    .tabs{display:flex;gap:2px;padding:10px 12px 0;border-bottom:1px solid var(--line-soft);overflow-x:auto}
+    .tab{font-family:var(--mono);font-size:12.5px;color:var(--dim);background:none;border:0;border-bottom:2px solid transparent;
+      padding:9px 14px;cursor:pointer;white-space:nowrap;transition:.15s}
+    .tab:hover{color:var(--text)}
+    .tab.active{color:var(--iris);border-bottom-color:var(--iris)}
+    .term-body{padding:18px;font-family:var(--mono);font-size:13px;line-height:1.85;min-height:200px;overflow-x:auto}
+    .term-body pre{margin:0;white-space:pre-wrap;word-break:break-word}
+    .term-body .pr{color:var(--iris)} .term-body .cm{color:var(--faint)} .term-body .ok{color:var(--ok)}
+    .term-body .kw{color:var(--iris)} .term-body .fn{color:var(--violet)} .term-body .st{color:var(--ok)} .term-body .out{color:var(--dim)}
+
+    /* cli */
+    .cli-grid{display:grid;grid-template-columns:280px 1fr;gap:16px;margin-top:40px}
+    @media(max-width:760px){.cli-grid{grid-template-columns:1fr}}
+    .cli-cmds{display:flex;flex-direction:column;gap:5px}
+    @media(max-width:760px){.cli-cmds{flex-direction:row;overflow-x:auto}}
+    .cli-cmd{font-family:var(--mono);font-size:12.5px;text-align:left;background:var(--panel);border:1px solid var(--line);border-radius:9px;
+      padding:10px 13px;cursor:pointer;color:var(--dim);transition:.15s;white-space:nowrap}
+    .cli-cmd:hover{color:var(--text);border-color:var(--line2)}
+    .cli-cmd.active{color:var(--iris);border-color:var(--iris);background:var(--raise)}
+    .cli-out{background:linear-gradient(180deg,#0e0e15,#0b0b11);border:1px solid var(--line2);border-radius:12px;overflow:hidden}
+    .cli-out .ph{padding:11px 14px;border-bottom:1px solid var(--line-soft);font-family:var(--mono);font-size:12px;color:var(--faint)}
+    .cli-out pre{margin:0;padding:16px;font-family:var(--mono);font-size:12.5px;line-height:1.8;color:var(--dim);white-space:pre-wrap;min-height:170px}
+
+    /* frameworks */
+    .fw{display:grid;grid-template-columns:1fr 1fr;gap:20px;margin-top:44px}
+    @media(max-width:760px){.fw{grid-template-columns:1fr}}
+    .fw-card{border:1px solid var(--line);border-radius:14px;background:var(--panel);padding:24px}
+    .fw-card h3{font-family:var(--mono);font-size:12.5px;text-transform:uppercase;letter-spacing:.06em;color:var(--faint);font-weight:600}
+    .fw-card.native h3{color:var(--ok)}
+    .fw-tags{display:flex;flex-wrap:wrap;gap:9px;margin-top:16px}
+    .fw-tag{font-family:var(--mono);font-size:13px;border:1px solid var(--line2);border-radius:8px;padding:8px 13px;color:var(--text)}
+    .fw-card.native .fw-tag{border-color:var(--iris-dim)}
+    .fw-card p{color:var(--dim);font-size:13.5px;margin-top:16px}
+
+    /* local-first */
+    .lf{display:grid;grid-template-columns:1fr 1fr;gap:48px;align-items:center;margin-top:8px}
+    @media(max-width:860px){.lf{grid-template-columns:1fr;gap:32px}}
+    .lf .checks{list-style:none;margin-top:22px;display:flex;flex-direction:column;gap:13px}
+    .lf .checks li{display:flex;gap:11px;font-size:15.5px}
+    .lf .checks svg{flex:none;margin-top:3px;color:var(--iris)}
+    .pipe{border:1px solid var(--line);border-radius:14px;background:var(--panel);padding:28px 24px;font-family:var(--mono);font-size:13px}
+    .pipe .row{display:flex;align-items:center;gap:12px;padding:10px 0}
+    .pipe .row .box{border:1px solid var(--line2);border-radius:9px;padding:9px 14px;color:var(--text);background:var(--bg2)}
+    .pipe .row .box.on{border-color:var(--iris);color:var(--iris)}
+    .pipe .arrow{color:var(--faint);text-align:center;padding:2px 0}
+    .pipe .no{margin-top:16px;padding-top:14px;border-top:1px dashed var(--line2);color:var(--faint);font-size:12px;text-decoration:line-through}
+
+    /* examples */
+    .ex{display:grid;grid-template-columns:repeat(3,1fr);gap:18px;margin-top:44px}
+    @media(max-width:900px){.ex{grid-template-columns:1fr}}
+    .ex-card{border:1px solid var(--line);border-radius:14px;background:var(--panel);padding:22px;display:flex;flex-direction:column;gap:12px}
+    .ex-card .tp{font-family:var(--mono);font-size:12px;color:var(--iris)}
+    .ex-step{font-family:var(--mono);font-size:12.5px;color:var(--dim);line-height:1.7}
+    .ex-step .b{color:var(--faint)}
+    .ex-card .fnd{margin-top:auto;border-top:1px dashed var(--line2);padding-top:12px;font-size:13px;color:var(--text)}
+    .ex-card .fnd .rc{font-family:var(--mono);color:var(--bad);font-weight:700}
+
+    /* final cta */
+    .final{text-align:center;padding:110px 0}
+    .final h2{font-size:clamp(30px,5vw,48px)}
+    .final p{color:var(--dim);font-size:18px;margin:16px auto 0;max-width:46ch}
+    .final .cmd{margin:30px auto 0}
+    .final .hero-cta{justify-content:center}
+
+    footer{border-top:1px solid var(--line);padding:48px 0 40px;background:var(--bg2)}
+    .foot{display:grid;grid-template-columns:2fr 1fr 1fr 1fr;gap:30px}
+    @media(max-width:720px){.foot{grid-template-columns:1fr 1fr}}
+    .foot .ab{max-width:32ch}
+    .foot .ab p{color:var(--dim);font-size:13.5px;margin-top:12px}
+    .foot h5{font-family:var(--mono);font-size:11.5px;text-transform:uppercase;letter-spacing:.08em;color:var(--faint);margin-bottom:14px}
+    .foot ul{list-style:none;display:flex;flex-direction:column;gap:10px}
+    .foot a{color:var(--dim);font-size:14px}.foot a:hover{color:var(--text)}
+    .foot-bot{border-top:1px solid var(--line);margin-top:40px;padding-top:22px;display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap;color:var(--faint);font-size:13px;font-family:var(--mono)}
+
+    .toast{position:fixed;bottom:24px;left:50%;transform:translate(-50%,20px);background:var(--raise);border:1px solid var(--iris-dim);
+      color:var(--text);font-family:var(--mono);font-size:13px;padding:10px 16px;border-radius:9px;opacity:0;pointer-events:none;transition:.25s;z-index:200}
+    .toast.show{opacity:1;transform:translate(-50%,0)}
+
+    @media(prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
   </style>
 </head>
 <body>
+  <a href="#main" style="position:absolute;left:-9999px" onfocus="this.style.left='12px';this.style.top='10px';this.style.zIndex='300'">Skip to content</a>
 
-<!-- NAV -->
-<nav>
-  <div class="nav-logo">agent<span>lens</span></div>
-  <div class="nav-links">
-    <a href="#how">How it works</a>
-    <a href="#examples">Examples</a>
-    <a href="#install">Install</a>
-    <a href="https://github.com/agentlens-hq/agentlens" class="nav-gh" target="_blank">
-      ★ GitHub
-    </a>
-  </div>
-</nav>
-
-<!-- HERO -->
-<section class="hero">
-  <div class="hero-badge">open source · local-first · no signup</div>
-  <h1>When your AI agent breaks,<br><em>this tells you why.</em></h1>
-  <p class="hero-sub">
-    Not logs. Not traces. <strong>The answer.</strong><br>
-    Exact step, root cause, one-line fix — in under 30 seconds.
-  </p>
-
-  <div class="install-wrap">
-    <span class="install-prompt">$</span>
-    <span class="install-cmd" id="install-text">pip install runlens</span>
-    <button class="copy-btn" onclick="copyInstall(this)" title="Copy">⎘</button>
-  </div>
-  <br>
-  <span class="hero-note">Python 3.9+ · no cloud · no API key required · <a href="https://github.com/agentlens-hq/agentlens" style="color:var(--text3)">clone first →</a></span>
-  <br><br>
-  <a href="/demo.html" style="display:inline-flex;align-items:center;gap:8px;background:rgba(34,197,94,0.08);border:1px solid rgba(34,197,94,0.25);border-radius:6px;padding:9px 18px;font-size:13px;font-family:var(--mono);color:var(--green);text-decoration:none" onmouseover="this.style.background='rgba(34,197,94,0.14)'" onmouseout="this.style.background='rgba(34,197,94,0.08)'">
-    → See a live diagnosis first
-  </a>
-
-  <div class="frameworks">
-    <span class="fw-tag fw-native">Anthropic</span>
-    <span class="fw-tag fw-native">OpenAI</span>
-    <span class="fw-tag fw-native">LangGraph</span>
-    <span class="fw-tag fw-native">raw API</span>
-    <span class="fw-tag">CrewAI*</span>
-    <span class="fw-tag">AutoGen*</span>
-    <span class="fw-tag">PydanticAI*</span>
-  </div>
-  <div class="fw-note">* traced through their underlying Anthropic/OpenAI calls — LLM + tool calls captured, framework-level spans on the roadmap</div>
-</section>
-
-<!-- TERMINAL DEMO -->
-<section class="wide tight">
-  <div class="terminal">
-    <div class="term-bar">
-      <span class="dot dot-r"></span>
-      <span class="dot dot-y"></span>
-      <span class="dot dot-g"></span>
-      <span class="term-title">agentlens — diagnose</span>
-    </div>
-    <div class="term-body">
-<p><span class="t-prompt">$</span> <span class="t-cmd">agentlens diagnose cf3fcea8</span></p>
-<span class="t-gap"></span>
-<p><span class="t-section">AgentLens Diagnosis</span></p>
-<p><span class="t-dim">═══════════════════════════════════════</span></p>
-<span class="t-gap"></span>
-<p><span class="t-section">ROOT CAUSE:</span></p>
-<p>  <span class="t-val">tool_selection</span></p>
-<span class="t-gap"></span>
-<p><span class="t-section">FAILED AT:</span></p>
-<p>  Step <span class="t-val">2</span>  <span class="t-dim">(search_web)</span></p>
-<span class="t-gap"></span>
-<p><span class="t-section">WHY:</span></p>
-<p>  <span class="t-out">Both tools had identical descriptions — the agent treated</span></p>
-<p>  <span class="t-out">them as interchangeable and called search_web for a local</span></p>
-<p>  <span class="t-out">record lookup that only query_db can answer.</span></p>
-<span class="t-gap"></span>
-<p><span class="t-section">FIX:</span></p>
-<p>  <span class="t-out">Rewrite tool descriptions so search_web is clearly for</span></p>
-<p>  <span class="t-out">external web queries and query_db is clearly for internal</span></p>
-<p>  <span class="t-out">customer records. Make them mutually exclusive.</span></p>
-<span class="t-gap"></span>
-<p><span class="t-section">CONFIDENCE:</span>  <span class="t-good">0.90</span></p>
-    </div>
-  </div>
-</section>
-
-<!-- HOW IT WORKS -->
-<section id="how">
-  <div class="section-label">// how it works</div>
-  <h2>Two lines. That's it.</h2>
-  <p class="sub">AgentLens patches your provider client at import time. No changes to existing agent code.</p>
-
-  <div class="steps">
-    <div class="step">
-      <div class="step-num">01</div>
-      <h3>Init before your client</h3>
-      <p>Call <code>agentlens.init()</code> before creating your Anthropic or OpenAI client. It patches the class — every call from that point is captured.</p>
-    </div>
-    <div class="step">
-      <div class="step-num">02</div>
-      <h3>Wrap your agent function</h3>
-      <p>Add <code>@agentlens.run(name="...")</code> to your agent. All LLM calls, tool calls, errors, and costs inside it are grouped into one run.</p>
-    </div>
-    <div class="step">
-      <div class="step-num">03</div>
-      <h3>Diagnose when it breaks</h3>
-      <p>Run <code>agentlens diagnose &lt;run_id&gt;</code>. Get the exact failure step, why the agent made that decision, and a one-line fix.</p>
-    </div>
-  </div>
-</section>
-
-<!-- CODE SNIPPET -->
-<section id="install" class="tight">
-  <div class="code-block">
-    <div class="code-header">
-      <span class="code-lang">python</span>
-      <span>quickstart.py</span>
-    </div>
-    <pre><span class="kw">import</span> agentlens
-<span class="kw">import</span> anthropic
-
-agentlens.<span class="fn">init</span>()                     <span class="cm"># patches Anthropic + OpenAI + async variants</span>
-
-client = anthropic.<span class="fn">Anthropic</span>()       <span class="cm"># captured automatically from here</span>
-
-<span class="dec">@agentlens.run</span>(<span class="fn">name</span>=<span class="str">"support_agent"</span>)  <span class="cm"># works with sync and async</span>
-<span class="kw">def</span> <span class="fn">run_agent</span>(query: <span class="fn">str</span>):
-    response = client.messages.<span class="fn">create</span>(
-        model=<span class="str">"claude-3-5-sonnet-latest"</span>,
-        max_tokens=<span class="fn">512</span>,
-        tools=[...],
-        messages=[{<span class="str">"role"</span>: <span class="str">"user"</span>, <span class="str">"content"</span>: query}],
-    )
-    <span class="cm"># record tool results after executing them</span>
-    agentlens.<span class="fn">record_tool_result</span>(tool_name=..., output=..., tool_use_id=...)
-    <span class="kw">return</span> response
-
-<span class="cm"># LangGraph — one extra line</span>
-agentlens.<span class="fn">patch_langgraph</span>()          <span class="cm"># call before graph.compile()</span>
-app = graph.<span class="fn">compile</span>()               <span class="cm"># every node is now a span</span></pre>
-  </div>
-</section>
-
-<!-- WHAT IT CATCHES -->
-<section>
-  <div class="section-label">// what it catches</div>
-  <h2>Six failure categories,<br>detected automatically.</h2>
-  <p class="sub">No configuration. No labelling. AgentLens reads the trace and finds the pattern.</p>
-
-  <div class="failures">
-    <div class="fail-card">
-      <span class="fail-tag">tool_selection</span>
-      <h3>Wrong tool chosen</h3>
-      <p>Agent picked the wrong tool because two tools had similar descriptions. The most common silent failure in multi-tool agents.</p>
-    </div>
-    <div class="fail-card">
-      <span class="fail-tag">loop</span>
-      <h3>Retried without exit</h3>
-      <p>Agent called the same tool with the same inputs multiple times instead of changing strategy after a failure.</p>
-    </div>
-    <div class="fail-card">
-      <span class="fail-tag">cascade</span>
-      <h3>Bad data propagated</h3>
-      <p>An upstream tool returned stale or null data. A downstream step used it and crashed. The real bug was 3 steps earlier.</p>
-    </div>
-    <div class="fail-card">
-      <span class="fail-tag">context_pollution</span>
-      <h3>Contradictory instructions</h3>
-      <p>Conflicting instructions in the system prompt diluted the agent's goal before it even started tool selection.</p>
-    </div>
-    <div class="fail-card">
-      <span class="fail-tag">state_drift</span>
-      <h3>Goal abandoned mid-run</h3>
-      <p>Agent started on the right task but lost track of the original goal across a long multi-step conversation.</p>
-    </div>
-    <div class="fail-card">
-      <span class="fail-tag">overflow</span>
-      <h3>Context window truncated</h3>
-      <p>Critical early context was pushed out of the context window before the key decision was made.</p>
-    </div>
-  </div>
-</section>
-
-<!-- DIAGNOSIS EXAMPLES -->
-<section id="examples">
-  <div class="section-label">// example diagnoses</div>
-  <h2>Same answer format. Any framework.</h2>
-  <p class="sub">Three failure patterns AgentLens detects — whatever your agent is built with, the diagnosis looks like this.</p>
-
-  <div class="diag-grid">
-    <div class="diag-card">
-      <div class="diag-header">
-        <span class="diag-fw">LangGraph</span>
-        <span class="diag-cat">tool_selection</span>
+  <nav id="nav">
+    <div class="wrap nav-in">
+      <a class="logo" href="#top" aria-label="AgentLens home">
+        <svg class="m" viewBox="0 0 32 32" aria-hidden="true"><rect width="32" height="32" rx="7" fill="#111118"/><circle cx="16" cy="16" r="8" fill="none" stroke="#7C8CFF" stroke-width="2.5"/><circle cx="16" cy="16" r="3" fill="#7C8CFF"/></svg>
+        AgentLens
+      </a>
+      <div class="nav-links">
+        <a href="#how">How it works</a>
+        <a href="#failures">Failures</a>
+        <a href="#demo">Demo</a>
+        <a href="#cli">CLI</a>
+        <a href="#examples">Examples</a>
       </div>
-      <div class="diag-body">
-        <div><span class="diag-label">step  </span><span class="diag-val">2 (search_web)</span></div>
-        <div><span class="diag-label">conf  </span><span class="diag-val" style="color:var(--green)">0.90</span></div>
-        <div class="diag-fix">Both tools had identical descriptions. Agent picked external web search for a local record lookup.</div>
-        <div class="diag-conf">
-          <div style="color:var(--text3);font-size:10px">confidence</div>
-          <div class="conf-bar-wrap"><div class="conf-bar" style="width:90%"></div></div>
+      <div class="nav-right">
+        <a class="gh" href="https://github.com/agentlens-hq/agentlens" target="_blank" rel="noopener">
+          <svg width="17" height="17" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 2C6.48 2 2 6.58 2 12.25c0 4.53 2.87 8.37 6.84 9.73.5.09.68-.22.68-.49v-1.7c-2.78.62-3.37-1.37-3.37-1.37-.46-1.18-1.11-1.5-1.11-1.5-.9-.63.07-.62.07-.62 1 .07 1.53 1.05 1.53 1.05.89 1.56 2.34 1.11 2.91.85.09-.66.35-1.11.63-1.36-2.22-.26-4.55-1.14-4.55-5.06 0-1.12.39-2.03 1.03-2.74-.1-.26-.45-1.3.1-2.7 0 0 .84-.28 2.75 1.05a9.3 9.3 0 0 1 5 0c1.91-1.33 2.75-1.05 2.75-1.05.55 1.4.2 2.44.1 2.7.64.71 1.03 1.62 1.03 2.74 0 3.93-2.34 4.79-4.57 5.05.36.32.68.94.68 1.9v2.82c0 .27.18.59.69.49A10.26 10.26 0 0 0 22 12.25C22 6.58 17.52 2 12 2Z"/></svg>
+          GitHub
+        </a>
+        <a class="btn btn-primary" href="#install">Install</a>
+      </div>
+      <button class="menu-btn" id="menuBtn" aria-label="Menu" aria-expanded="false"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 6h16M4 12h16M4 18h16"/></svg></button>
+    </div>
+  </nav>
+  <div class="mobile-menu" id="mobileMenu">
+    <a href="#how">How it works</a><a href="#failures">Failures</a><a href="#demo">Demo</a><a href="#cli">CLI</a><a href="#examples">Examples</a>
+    <a href="https://github.com/agentlens-hq/agentlens" target="_blank" rel="noopener">GitHub</a>
+    <a class="btn btn-primary" href="#install">Install AgentLens</a>
+  </div>
+
+  <main id="main">
+  <!-- HERO -->
+  <header id="top" class="hero">
+    <div class="grid-bg"></div>
+    <div class="wrap hero-grid">
+      <div>
+        <span class="badge"><span class="d"></span>Local-first · open source · works offline</span>
+        <h1 class="hero-h">When your AI agent breaks,<br><span class="g">find exactly why.</span></h1>
+        <div class="answer"><span>Not logs.</span><span class="sep">/</span><span>Not traces.</span><span class="sep">/</span><b>The answer.</b></div>
+        <p class="sub">AgentLens reads the run, names the one decision that broke it, and hands you the fix — root cause, the exact failed step, why, confidence, and what it cost. In seconds.</p>
+        <div class="cmd">
+          <span class="pr">$</span><span class="txt">pip install runlens</span>
+          <button data-copy="pip install runlens" aria-label="Copy install command"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V5a2 2 0 0 1 2-2h10"/></svg>Copy</button>
+        </div>
+        <div class="hero-cta">
+          <a class="btn btn-primary btn-lg" href="#install">Install AgentLens</a>
+          <a class="btn btn-ghost btn-lg" href="https://github.com/agentlens-hq/agentlens" target="_blank" rel="noopener">View on GitHub</a>
+        </div>
+        <p class="hero-note">Validated live on OpenAI &amp; Anthropic across all six failure categories — zero false positives on healthy runs.</p>
+      </div>
+
+      <div class="console" id="console">
+        <button class="replay" id="replay" aria-label="Replay diagnosis">↻ replay</button>
+        <div class="bar"><span class="c" style="background:#ff5f56"></span><span class="c" style="background:#ffbd2e"></span><span class="c" style="background:#27c93f"></span><span class="t">$ <b>agentlens diagnose</b> support_agent</span></div>
+        <div class="console-body" id="cbody">
+          <div class="tstep" data-s="1"><span class="n">01</span><span class="ic"></span><span>llm_call · <span style="color:var(--dim)">plan</span></span></div>
+          <div class="tstep" data-s="2"><span class="n">02</span><span class="ic"></span><span><span class="tool">search_web</span> · "renewal status for customer:alex"</span><span class="flag"></span></div>
+          <div class="tstep" data-s="3"><span class="n">03</span><span class="ic"></span><span>llm_call · <span style="color:var(--dim)">read result</span></span></div>
+          <div class="tstep" data-s="4"><span class="n">04</span><span class="ic"></span><span><span class="tool">query_db</span> · never reached</span></div>
+          <div class="scanline" id="scan"></div>
+          <div class="diag" id="diag">
+            <div class="vr"><span class="vpill"><span class="d"></span>failure_detected</span><span style="font-size:12px;color:var(--dim)">confidence <b style="color:var(--text)">0.90</b></span></div>
+            <div class="drow"><span class="k">root cause</span><span class="v"><span class="rc">tool_selection</span></span></div>
+            <div class="drow"><span class="k">failed at</span><span class="v">step 2 · <em>search_web</em></span></div>
+            <div class="drow"><span class="k">why</span><span class="v">Both tools had near-identical descriptions — the agent treated them as interchangeable and searched the web for a record that only lives in the database.</span></div>
+            <div class="drow"><span class="k">fix</span><span class="v">Rewrite the descriptions so search_web is clearly external and query_db is clearly for local records.</span></div>
+            <div class="imp">impact&nbsp;&nbsp;wasted ~<b>430 tokens · $0.0021</b> on the failed path</div>
+          </div>
         </div>
       </div>
     </div>
+  </header>
 
-    <div class="diag-card">
-      <div class="diag-header">
-        <span class="diag-fw">AutoGen</span>
-        <span class="diag-cat">loop</span>
+  <!-- captures -->
+  <div class="strip">
+    <div class="wrap strip-in">
+      <span class="lab">Captures agents built on</span>
+      <span class="co">Anthropic</span><span class="co">OpenAI</span><span class="co">LangGraph</span><span class="co">CrewAI</span><span class="co">AutoGen</span><span class="co">PydanticAI</span>
+    </div>
+  </div>
+
+  <!-- NOT JUST OBSERVABILITY -->
+  <section>
+    <div class="wrap">
+      <div class="sec-head"><span class="kick">Not just observability</span>
+        <h2>Tracing shows you what happened.<br>AgentLens tells you why.</h2>
+        <p>Observability hands you a pile of spans and wishes you luck. AgentLens reads the same trace and distills it to the one decision that broke the run.</p>
       </div>
-      <div class="diag-body">
-        <div><span class="diag-label">step  </span><span class="diag-val">7 (fetch_data)</span></div>
-        <div><span class="diag-label">conf  </span><span class="diag-val" style="color:var(--green)">0.95</span></div>
-        <div class="diag-fix">Step 7 repeats the same tool call first made at step 3. No exit condition after repeated failure.</div>
-        <div class="diag-conf">
-          <div style="color:var(--text3);font-size:10px">confidence</div>
-          <div class="conf-bar-wrap"><div class="conf-bar" style="width:95%"></div></div>
+      <div class="cmp">
+        <div class="cmp-card">
+          <h3>Traditional tracing</h3>
+          <div class="cmp-list">
+            <div>trace captured <span class="mut">→ 47 spans</span></div>
+            <div><span class="mut">→ 9 tool calls</span></div>
+            <div><span class="mut">→ 3 errors, 2 retries</span></div>
+            <div><span class="mut">→ 6 nested LLM calls</span></div>
+            <div class="mut">→ you scroll, correlate, and guess</div>
+          </div>
+          <span class="cmp-tag">Answer: somewhere in there.</span>
+        </div>
+        <div class="cmp-card you">
+          <h3>AgentLens</h3>
+          <div class="cmp-list">
+            <div>trace captured <span class="ar">→</span> diagnosed</div>
+            <div>root cause <span class="ar">→</span> <span class="rc">tool_selection</span></div>
+            <div>failed step <span class="ar">→</span> step 2 · search_web</div>
+            <div>why <span class="ar">→</span> ambiguous tool descriptions</div>
+            <div>fix <span class="ar">→</span> rewrite descriptions</div>
+          </div>
+          <span class="cmp-tag">Answer: one decision, with the fix.</span>
         </div>
       </div>
     </div>
+  </section>
 
-    <div class="diag-card">
-      <div class="diag-header">
-        <span class="diag-fw">PydanticAI</span>
-        <span class="diag-cat">cascade</span>
+  <!-- FAILURE CATEGORIES (interactive debugger) -->
+  <section id="failures">
+    <div class="wrap">
+      <div class="sec-head"><span class="kick">Six failure modes</span>
+        <h2>A debugger that knows how agents break.</h2>
+        <p>Pick a failure. See the trace that produces it and the diagnosis AgentLens returns. It classifies by pattern — and stays quiet when it isn't sure, instead of guessing.</p>
       </div>
-      <div class="diag-body">
-        <div><span class="diag-label">step  </span><span class="diag-val">3 (get_user_profile)</span></div>
-        <div><span class="diag-label">conf  </span><span class="diag-val" style="color:var(--green)">0.90</span></div>
-        <div class="diag-fix">Profile returned email: null (stale cache). send_email used it at step 6 and crashed.</div>
-        <div class="diag-conf">
-          <div style="color:var(--text3);font-size:10px">confidence</div>
-          <div class="conf-bar-wrap"><div class="conf-bar" style="width:90%"></div></div>
+      <div class="dbg">
+        <div class="cat-list" id="catList" role="tablist" aria-label="Failure categories"></div>
+        <div class="dbg-panel"><div class="ph">agent trace</div><div class="dbg-trace" id="dbgTrace"></div></div>
+        <div class="dbg-panel"><div class="ph">agentlens diagnosis</div><div class="dbg-diag" id="dbgDiag"></div></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- INTERACTIVE DEMO -->
+  <section id="demo">
+    <div class="wrap">
+      <div class="sec-head"><span class="kick">Watch it work</span>
+        <h2>Run a broken agent. Diagnose it.</h2>
+        <p>A five-step support agent that reaches for the wrong tool. Run it, watch it fail, then let AgentLens turn the raw trace into a diagnosis.</p>
+      </div>
+      <div class="demo">
+        <div class="demo-top">
+          <span class="ttl">support_agent · simulated run</span>
+          <div class="acts">
+            <button class="btn btn-ghost" id="runBtn"><svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>Run agent</button>
+            <button class="btn btn-primary" id="diagBtn" disabled style="opacity:.5">Diagnose</button>
+          </div>
+        </div>
+        <div class="demo-grid">
+          <div class="flow" id="flow">
+            <div class="node" data-n="0">User<span class="sub">"what's alex's renewal status?"</span></div>
+            <div class="edge"></div>
+            <div class="node" data-n="1">Planner<span class="sub">llm_call</span></div>
+            <div class="edge"></div>
+            <div class="node" data-n="2">search_web<span class="sub">tool call</span></div>
+            <div class="edge"></div>
+            <div class="node" data-n="3">query_db<span class="sub">tool call</span></div>
+            <div class="edge"></div>
+            <div class="node" data-n="4">Response<span class="sub">final answer</span></div>
+          </div>
+          <div class="demo-out" id="demoOut">
+            <div class="placeholder" id="demoPlaceholder">▸ press <span style="color:var(--iris)">Run agent</span> to execute the trace<br>then <span style="color:var(--iris)">Diagnose</span> to see the root cause</div>
+          </div>
         </div>
       </div>
     </div>
-  </div>
-</section>
+  </section>
 
-<!-- ALSO DETECTS -->
-<section class="tight">
-  <hr class="divider" />
-  <br>
-  <div class="section-label">// also detects</div>
-  <h2>Hallucinations, too.</h2>
-  <p class="sub">AgentLens checks every tool call against the tool schema. If the agent invents a parameter that doesn't exist, it's flagged immediately.</p>
-  <div class="terminal" style="max-width:620px">
-    <div class="term-bar">
-      <span class="dot dot-r"></span><span class="dot dot-y"></span><span class="dot dot-g"></span>
-      <span class="term-title">hallucination detection</span>
+  <!-- HOW IT WORKS -->
+  <section id="how">
+    <div class="wrap">
+      <div class="sec-head"><span class="kick">How it works</span>
+        <h2>Two lines to install. Then ask why.</h2>
+        <p>Add AgentLens before your existing provider client. Nothing else changes — it patches Anthropic and OpenAI at import time and captures every call locally.</p>
+      </div>
+      <div class="steps">
+        <div class="step">
+          <div class="sh"><span class="num">01</span><h3>Initialize</h3></div>
+          <p>One call patches your provider clients — sync, async, and streaming.</p>
+          <div class="code"><button class="cp" data-copy="import agentlens&#10;agentlens.init()">copy</button><pre><span class="kw">import</span> agentlens
+agentlens.<span class="fn">init</span>()</pre></div>
+        </div>
+        <div class="step">
+          <div class="sh"><span class="num">02</span><h3>Run</h3></div>
+          <p>Wrap your agent so every span groups into one run in <span class="mono">.agentlens/runs/</span>.</p>
+          <div class="code"><button class="cp" data-copy='@agentlens.run(name="support_agent")&#10;def run_agent(query):&#10;    ...'>copy</button><pre><span class="kw">@agentlens.run</span>(name=<span class="st">"support_agent"</span>)
+<span class="kw">def</span> <span class="fn">run_agent</span>(query):
+    <span class="cm"># your agent, unchanged</span></pre></div>
+        </div>
+        <div class="step">
+          <div class="sh"><span class="num">03</span><h3>Diagnose</h3></div>
+          <p>Root cause, the failed step, why, the fix, confidence, and cost.</p>
+          <div class="code"><button class="cp" data-copy="agentlens diagnose <run_id>">copy</button><pre><span class="cm">$</span> agentlens diagnose <span class="out">&lt;run_id&gt;</span></pre></div>
+        </div>
+      </div>
     </div>
-    <div class="term-body">
-<p><span class="t-section">HALLUCINATIONS DETECTED:</span></p>
-<span class="t-gap"></span>
-<p>  <span class="t-bad">[HIGH]</span> <span class="t-out">step 2 — invented param:</span></p>
-<p>  <span class="t-out">  'query_db' was called with ['limit', 'sort_by']</span></p>
-<p>  <span class="t-out">  which are not in its schema.</span></p>
-<p>  <span class="t-dim">  Valid params: ['customer_id', 'field']</span></p>
-<span class="t-gap"></span>
-<p>  <span class="t-warn">[MED]</span>  <span class="t-out">step 4 — context contradiction:</span></p>
-<p>  <span class="t-out">  LLM claims "order found" but get_order</span></p>
-<p>  <span class="t-out">  returned status: "not found" at step 3.</span></p>
+  </section>
+
+  <!-- INSTALL / integrations terminal -->
+  <section id="install">
+    <div class="wrap">
+      <div class="sec-head"><span class="kick">Get started</span>
+        <h2>Running in 30 seconds. No API key needed.</h2>
+        <p>Install, then run the built-in demo to see a full diagnosis with no setup. Switch tabs for the exact snippet per provider — every one verified against the library.</p>
+      </div>
+      <div class="termbox">
+        <div class="tabs" id="tabs" role="tablist" aria-label="Setup examples"></div>
+        <div class="term-body" id="termBody"></div>
+      </div>
     </div>
-  </div>
-</section>
+  </section>
 
-<!-- CLI -->
-<section>
-  <div class="section-label">// cli</div>
-  <h2>Everything from the terminal.</h2>
-  <p class="sub">No dashboard to sign in to. No data leaving your machine.</p>
-
-  <div class="code-block">
-    <div class="code-header">
-      <span class="code-lang">shell</span>
+  <!-- CLI -->
+  <section id="cli">
+    <div class="wrap">
+      <div class="sec-head"><span class="kick">Command line</span>
+        <h2>The whole workflow lives in your terminal.</h2>
+        <p>Capture, list, inspect, diagnose, cluster. Click a command to preview what it does.</p>
+      </div>
+      <div class="cli-grid">
+        <div class="cli-cmds" id="cliCmds" role="tablist" aria-label="CLI commands"></div>
+        <div class="cli-out"><div class="ph" id="cliPh"></div><pre id="cliOut"></pre></div>
+      </div>
     </div>
-    <pre><span class="t-prompt" style="color:var(--green)">$</span> agentlens demo               <span class="cm"># see a full diagnosis in 10 seconds — no API key</span>
-<span class="t-prompt" style="color:var(--green)">$</span> agentlens watch              <span class="cm"># live mode — spans stream as your agent runs</span>
-<span class="t-prompt" style="color:var(--green)">$</span> agentlens runs list          <span class="cm"># all recent runs with status + cost</span>
-<span class="t-prompt" style="color:var(--green)">$</span> agentlens runs view &lt;id&gt;    <span class="cm"># visual timeline in the browser</span>
-<span class="t-prompt" style="color:var(--green)">$</span> agentlens diagnose &lt;id&gt;     <span class="cm"># root cause + fix</span>
-<span class="t-prompt" style="color:var(--green)">$</span> agentlens stats              <span class="cm"># token usage, latency, cost across all runs</span></pre>
-  </div>
-</section>
+  </section>
 
-<!-- CTA -->
-<section style="text-align:center; padding-bottom: 96px;">
-  <hr class="divider" style="margin-bottom: 64px;" />
-  <div class="section-label" style="text-align:center">// get started</div>
-  <h2>Your agent broke.<br>Find out why in 30 seconds.</h2>
-  <p class="sub" style="margin: 16px auto 36px;">Free. Local. No account.</p>
+  <!-- FRAMEWORKS -->
+  <section>
+    <div class="wrap">
+      <div class="sec-head"><span class="kick">Coverage</span><h2>Works with what you already build on.</h2>
+        <p>AgentLens captures at the provider layer, so it sees agents whether you write raw API calls or use a framework on top.</p>
+      </div>
+      <div class="fw">
+        <div class="fw-card native">
+          <h3>Native support</h3>
+          <div class="fw-tags"><span class="fw-tag">Anthropic</span><span class="fw-tag">OpenAI</span><span class="fw-tag">LangGraph</span><span class="fw-tag">raw API</span></div>
+          <p>Instrumented directly. <span class="mono">agentlens.init()</span> patches the Anthropic and OpenAI clients; <span class="mono">patch_langgraph()</span> wraps a compiled graph.</p>
+        </div>
+        <div class="fw-card">
+          <h3>Captured via underlying calls</h3>
+          <div class="fw-tags"><span class="fw-tag">CrewAI</span><span class="fw-tag">AutoGen</span><span class="fw-tag">PydanticAI</span></div>
+          <p>These frameworks run on Anthropic/OpenAI under the hood, so their calls are captured too. Framework-level spans are on the roadmap.</p>
+        </div>
+      </div>
+    </div>
+  </section>
 
-  <div class="install-wrap" style="margin: 0 auto 16px;">
-    <span class="install-prompt">$</span>
-    <span class="install-cmd">pip install runlens &amp;&amp; agentlens demo</span>
-    <button class="copy-btn" onclick="copyInstall(this)" title="Copy">⎘</button>
-  </div>
-  <br>
-  <span class="hero-note">two commands — full diagnosis in your browser, no API key</span>
-  <br><br>
-  <a href="https://github.com/agentlens-hq/agentlens" target="_blank" style="color:var(--text2); font-size:13px; font-family:var(--mono);">
-    ★ Star on GitHub →
-  </a>
-</section>
+  <!-- LOCAL FIRST -->
+  <section>
+    <div class="wrap">
+      <div class="lf">
+        <div>
+          <span class="kick">Local-first</span>
+          <h2 style="font-size:clamp(26px,3.4vw,36px);margin-top:14px">Your traces never leave your machine.</h2>
+          <p style="color:var(--dim);font-size:17px;margin-top:16px">No signup, no account, no cloud dependency. Runs are stored on disk and diagnosis works fully offline with a fast local classifier — an LLM pass is optional if you set a key.</p>
+          <ul class="checks">
+            <li><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><path d="M20 6 9 17l-5-5"/></svg>Runs saved locally in <span class="mono" style="color:var(--text)">.agentlens/runs/</span></li>
+            <li><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><path d="M20 6 9 17l-5-5"/></svg>Offline diagnosis — no API key required</li>
+            <li><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><path d="M20 6 9 17l-5-5"/></svg>Open source, MIT licensed</li>
+          </ul>
+        </div>
+        <div class="pipe">
+          <div class="row"><span class="box on">your agent trace</span></div>
+          <div class="arrow">↓</div>
+          <div class="row"><span class="box">your machine <span style="color:var(--faint)">· .agentlens/</span></span></div>
+          <div class="arrow">↓</div>
+          <div class="row"><span class="box on">agentlens diagnose</span></div>
+          <div class="arrow">↓</div>
+          <div class="row"><span class="box">diagnosis</span></div>
+          <div class="no">your data → some random cloud</div>
+        </div>
+      </div>
+    </div>
+  </section>
 
-<footer>
-  <p>agentlens.run · Open source · <a href="https://github.com/agentlens-hq/agentlens" target="_blank">GitHub</a> · MIT License</p>
-</footer>
+  <!-- EXAMPLES -->
+  <section id="examples">
+    <div class="wrap">
+      <div class="sec-head"><span class="kick">Real diagnoses</span><h2>What a broken agent looks like, resolved.</h2>
+        <p>Three failure shapes AgentLens catches — from what the agent did to the fix.</p>
+      </div>
+      <div class="ex">
+        <div class="ex-card">
+          <span class="tp">tool_selection</span>
+          <div class="ex-step"><span class="b">did</span> · asked for a local record, called <span style="color:var(--violet)">search_web</span></div>
+          <div class="ex-step"><span class="b">broke</span> · web has no private customer data</div>
+          <div class="fnd"><span class="rc">tool_selection</span> @ 0.90 — fix: give the two tools distinct descriptions.</div>
+        </div>
+        <div class="ex-card">
+          <span class="tp">loop</span>
+          <div class="ex-step"><span class="b">did</span> · called <span style="color:var(--violet)">query_db</span>("alex") three times</div>
+          <div class="ex-step"><span class="b">broke</span> · same tool + input, no exit condition</div>
+          <div class="fnd"><span class="rc">loop</span> @ 0.95 — flagged at the origin step, not where you noticed it.</div>
+        </div>
+        <div class="ex-card">
+          <span class="tp">cascade</span>
+          <div class="ex-step"><span class="b">did</span> · used a stale tool result downstream</div>
+          <div class="ex-step"><span class="b">broke</span> · bad upstream data corrupted the next step</div>
+          <div class="fnd"><span class="rc">cascade</span> @ 0.90 — fix: validate the output before it's reused.</div>
+        </div>
+      </div>
+    </div>
+  </section>
 
-<script>
-  function copyInstall(btn) {
-    const cmd = btn && btn.parentElement.querySelector('.install-cmd');
-    const text = cmd ? cmd.textContent.trim() : 'pip install runlens';
-    navigator.clipboard.writeText(text).then(() => {
-      btn = btn || document.querySelector('.copy-btn');
-      btn.textContent = '✓';
-      btn.style.color = 'var(--green)';
-      setTimeout(() => { btn.textContent = '⎘'; btn.style.color = ''; }, 1800);
+  <!-- FINAL CTA -->
+  <section class="final">
+    <div class="wrap">
+      <span class="kick">Stop guessing</span>
+      <h2 style="margin-top:14px">Point it at a broken run.<br>Get the answer.</h2>
+      <p>Local-first, open source, and honest about what it can and can't catch.</p>
+      <div class="cmd" style="max-width:340px">
+        <span class="pr">$</span><span class="txt">pip install runlens</span>
+        <button data-copy="pip install runlens" aria-label="Copy install command"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V5a2 2 0 0 1 2-2h10"/></svg>Copy</button>
+      </div>
+      <div class="hero-cta">
+        <a class="btn btn-primary btn-lg" href="https://pypi.org/project/runlens/" target="_blank" rel="noopener">Install AgentLens</a>
+        <a class="btn btn-ghost btn-lg" href="https://github.com/agentlens-hq/agentlens" target="_blank" rel="noopener">View source</a>
+      </div>
+    </div>
+  </section>
+  </main>
+
+  <footer>
+    <div class="wrap">
+      <div class="foot">
+        <div class="ab">
+          <a class="logo" href="#top"><svg class="m" viewBox="0 0 32 32" aria-hidden="true"><rect width="32" height="32" rx="7" fill="#111118"/><circle cx="16" cy="16" r="8" fill="none" stroke="#7C8CFF" stroke-width="2.5"/><circle cx="16" cy="16" r="3" fill="#7C8CFF"/></svg>AgentLens</a>
+          <p>The debugger for AI agents. When your agent breaks, it tells you why — root cause, the fix, and the cost.</p>
+        </div>
+        <div><h5>Product</h5><ul><li><a href="#how">How it works</a></li><li><a href="#failures">Failures</a></li><li><a href="#cli">CLI</a></li><li><a href="#examples">Examples</a></li></ul></div>
+        <div><h5>Resources</h5><ul><li><a href="https://agentlens.run/demo.html">Live demo</a></li><li><a href="https://pypi.org/project/runlens/" target="_blank" rel="noopener">PyPI</a></li><li><a href="https://github.com/agentlens-hq/agentlens" target="_blank" rel="noopener">GitHub</a></li></ul></div>
+        <div><h5>Open source</h5><ul><li><a href="https://github.com/agentlens-hq/agentlens" target="_blank" rel="noopener">Read the code</a></li><li><a href="https://github.com/agentlens-hq/agentlens/issues" target="_blank" rel="noopener">Open an issue</a></li><li><a href="https://github.com/agentlens-hq/agentlens" target="_blank" rel="noopener">Contribute</a></li></ul></div>
+      </div>
+      <div class="foot-bot"><span>© 2026 AgentLens · MIT</span><span>pip install runlens</span></div>
+    </div>
+  </footer>
+
+  <div class="toast" id="toast">Copied to clipboard</div>
+
+  <script>
+  (function(){
+    "use strict";
+    var reduce = window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+    /* ---- toast + copy ---- */
+    var toast = document.getElementById("toast");
+    function showToast(msg){ toast.textContent = msg || "Copied to clipboard"; toast.classList.add("show"); clearTimeout(toast._t); toast._t=setTimeout(function(){toast.classList.remove("show");},1500); }
+    document.addEventListener("click", function(e){
+      var b = e.target.closest("[data-copy]"); if(!b) return;
+      var text = b.getAttribute("data-copy");
+      navigator.clipboard && navigator.clipboard.writeText(text).then(function(){
+        var prev = b.innerHTML; if(b.classList.contains("cp")){ b.textContent="copied ✓"; setTimeout(function(){b.textContent="copy";},1300); }
+        else if(b.querySelector("svg")){ showToast("Copied  ·  "+text); }
+        else { b.textContent="copied ✓"; setTimeout(function(){b.innerHTML=prev;},1300); }
+      }).catch(function(){ showToast("Copy failed — select manually"); });
     });
-  }
-</script>
+
+    /* ---- nav scroll + mobile ---- */
+    var nav = document.getElementById("nav");
+    function onScroll(){ nav.classList.toggle("scrolled", window.scrollY > 8); }
+    onScroll(); window.addEventListener("scroll", onScroll, {passive:true});
+    var menuBtn=document.getElementById("menuBtn"), mm=document.getElementById("mobileMenu");
+    menuBtn.addEventListener("click", function(){ var o=mm.classList.toggle("open"); menuBtn.setAttribute("aria-expanded", o?"true":"false"); });
+    mm.addEventListener("click", function(e){ if(e.target.tagName==="A"){ mm.classList.remove("open"); menuBtn.setAttribute("aria-expanded","false"); } });
+
+    /* ---- hero diagnosis sequence ---- */
+    var steps = Array.prototype.slice.call(document.querySelectorAll("#cbody .tstep"));
+    var scan=document.getElementById("scan"), diag=document.getElementById("diag");
+    var flag = steps[1].querySelector(".flag");
+    function resetHero(){ steps.forEach(function(s){ s.className="tstep"; }); scan.className="scanline"; diag.className="diag"; flag.textContent=""; }
+    var timers=[];
+    function clearTimers(){ timers.forEach(clearTimeout); timers=[]; }
+    function playHero(){
+      clearTimers(); resetHero();
+      if(reduce){ steps.forEach(function(s){s.classList.add("on");}); steps[0].classList.add("done");steps[2].classList.add("done"); steps[1].classList.add("failed"); flag.textContent="✗ failed"; steps[3].classList.add("on"); diag.classList.add("on"); return; }
+      var seq=[
+        [200,function(){steps[0].classList.add("on","run");}],
+        [650,function(){steps[0].classList.remove("run");steps[0].classList.add("done");steps[1].classList.add("on","run");}],
+        [1250,function(){steps[1].classList.remove("run");steps[1].classList.add("failed");flag.textContent="✗ failed";}],
+        [1700,function(){steps[2].classList.add("on","run");}],
+        [2150,function(){steps[2].classList.remove("run");steps[2].classList.add("done");steps[3].classList.add("on");}],
+        [2500,function(){scan.classList.add("on");}],
+        [3200,function(){diag.classList.add("on");}]
+      ];
+      seq.forEach(function(p){ timers.push(setTimeout(p[1],p[0])); });
+    }
+    document.getElementById("replay").addEventListener("click", playHero);
+    var heroObs=new IntersectionObserver(function(en){ en.forEach(function(x){ if(x.isIntersecting){ playHero(); heroObs.disconnect(); } }); },{threshold:.35});
+    heroObs.observe(document.getElementById("console"));
+
+    /* ---- failure category debugger ---- */
+    var CATS=[
+      {id:"tool_selection",desc:"wrong tool chosen",conf:"0.90",step:"2 · search_web",
+        trace:[["01","llm_call · plan",0],["02","search_web · customer:alex",1],["03","llm_call · read result",0]],
+        why:"Two tools had near-identical descriptions; the agent searched the web for a record that only lives in the database.",
+        fix:"Give search_web and query_db clearly distinct descriptions.",imp:"~430 tokens · $0.0021"},
+      {id:"loop",desc:"same call repeated, no exit",conf:"0.95",step:"4 · query_db (origin)",
+        trace:[["02","query_db · alex",0],["04","query_db · alex ↻",1],["06","query_db · alex ↻",1]],
+        why:"The same tool and input recur with no stop condition — the agent never breaks out.",
+        fix:"Add a stop condition or dedupe identical tool calls before retrying.",imp:"~1,240 tokens · $0.0031"},
+      {id:"cascade",desc:"bad upstream data breaks downstream",conf:"0.90",step:"6 · send_email",
+        trace:[["03","get_profile · {email:null}",0],["05","llm_call · compose",0],["06","send_email · to=null",1]],
+        why:"An upstream tool returned stale/empty data and a downstream step trusted it without validating.",
+        fix:"Validate the upstream output before it feeds the next step.",imp:"~610 tokens · $0.0018"},
+      {id:"context_pollution",desc:"contradictory instructions",conf:"0.88",step:"1 · llm_call",
+        trace:[["01","llm_call · conflicting system + user",1],["02","tool_call · wrong target",0]],
+        why:"The prompt carried contradictory instructions, so the agent diluted the real goal into a split answer.",
+        fix:"Remove or reconcile the conflicting instruction in the prompt.",imp:"~380 tokens · $0.0015"},
+      {id:"state_drift",desc:"original goal abandoned",conf:"0.89",step:"3 · llm_call",
+        trace:[["01","goal · refund status for alex",0],["03","llm_call · answers about weather",1]],
+        why:"The agent wandered off its original objective mid-run and started solving a different problem.",
+        fix:"Re-anchor the goal each turn or checkpoint the objective.",imp:"~520 tokens · $0.0016"},
+      {id:"overflow",desc:"key context pushed out",conf:"0.72",step:"5 · llm_call",
+        trace:[["01","fact · access code = BLUE-17",0],["04","...long history evicts it...",0],["05","llm_call · 'I don't have it'",1]],
+        why:"A key fact was evicted from the window before the step that needed it; the model answered from what was left.",
+        fix:"Summarize or pin critical facts so they survive the window.",imp:"~2,100 tokens · $0.0052"}
+    ];
+    var catList=document.getElementById("catList"), dbgTrace=document.getElementById("dbgTrace"), dbgDiag=document.getElementById("dbgDiag");
+    function renderCat(i){
+      var c=CATS[i];
+      Array.prototype.forEach.call(catList.children,function(el,idx){ el.classList.toggle("active",idx===i); el.setAttribute("aria-selected",idx===i?"true":"false"); });
+      dbgTrace.innerHTML = c.trace.map(function(t){ return '<div class="ln'+(t[2]?' bad':'')+'"><span class="n">'+t[0]+'</span><span>'+t[1].replace(/(query_db|search_web|send_email|get_profile|tool_call)/,'<span class="tl">$1</span>')+'</span></div>'; }).join("");
+      dbgDiag.innerHTML =
+        '<span class="vpill"><span class="d"></span>failure_detected</span>'+
+        '<div class="drow"><span class="k">root cause</span><span class="v"><span class="rc">'+c.id+'</span></span></div>'+
+        '<div class="drow"><span class="k">failed at</span><span class="v">step '+c.step+'</span></div>'+
+        '<div class="drow"><span class="k">why</span><span class="v">'+c.why+'</span></div>'+
+        '<div class="drow"><span class="k">fix</span><span class="v">'+c.fix+'</span></div>'+
+        '<div class="drow"><span class="k">confidence</span><span class="v">'+c.conf+'</span></div>'+
+        '<div class="imp">impact&nbsp;&nbsp;wasted ~<b>'+c.imp+'</b></div>';
+    }
+    CATS.forEach(function(c,i){
+      var b=document.createElement("button"); b.className="cat"; b.setAttribute("role","tab");
+      b.innerHTML='<span class="nm">'+c.id+'</span><span class="ds">'+c.desc+'</span>';
+      b.addEventListener("click",function(){ renderCat(i); });
+      catList.appendChild(b);
+    });
+    renderCat(0);
+
+    /* ---- interactive demo ---- */
+    var flow=document.getElementById("flow"), out=document.getElementById("demoOut"), ph=document.getElementById("demoPlaceholder");
+    var runBtn=document.getElementById("runBtn"), diagBtn=document.getElementById("diagBtn");
+    var nodes=Array.prototype.slice.call(flow.querySelectorAll(".node"));
+    var edges=Array.prototype.slice.call(flow.querySelectorAll(".edge"));
+    var demoTimers=[];
+    function clearDemo(){ demoTimers.forEach(clearTimeout); demoTimers=[]; }
+    function resetDemo(){ clearDemo(); nodes.forEach(function(n){n.className="node";}); edges.forEach(function(e){e.className="edge";}); }
+    function runDemo(){
+      resetDemo();
+      diagBtn.disabled=true; diagBtn.style.opacity=".5";
+      ph.style.display="none";
+      out.innerHTML='<div class="demo-log" id="dl"></div>';
+      var dl=document.getElementById("dl");
+      var lines=[
+        ['<span class="mut">$ python support_agent.py</span>',0],
+        ['user → "what\'s alex\'s renewal status?"',300],
+        ['<span class="ok">✓</span> planner · chose a tool',700],
+        ['→ <span style="color:var(--violet)">search_web</span>("renewal status for customer:alex")',1050],
+        ['<span class="bad">✗ search_web returned: no public record found</span>',1500],
+        ['agent answered from an empty result — <span class="bad">wrong</span>',1900]
+      ];
+      function step(idx){
+        if(idx>=lines.length){ diagBtn.disabled=false; diagBtn.style.opacity="1"; return; }
+        var d=document.createElement("div"); d.className="l"; d.innerHTML="▸ "+lines[idx][0]; dl.appendChild(d);
+        requestAnimationFrame(function(){ d.classList.add("on"); });
+        // node states
+        if(idx===1){ nodes[0].classList.add("done"); }
+        if(idx===2){ edges[0].classList.add("on"); nodes[1].classList.add("done"); edges[1].classList.add("on"); }
+        if(idx===3){ nodes[2].classList.add("run"); }
+        if(idx===4){ nodes[2].classList.remove("run"); nodes[2].classList.add("failed"); edges[2].classList.add("bad"); }
+        var delay = reduce?120:(lines[idx+1]?lines[idx+1][1]-lines[idx][1]:400);
+        demoTimers.push(setTimeout(function(){ step(idx+1); }, delay));
+      }
+      step(0);
+    }
+    function diagnoseDemo(){
+      clearDemo();
+      out.innerHTML='<div class="demo-log"><div class="l on"><span class="mut">$ agentlens diagnose support_agent</span></div><div class="l on" style="color:var(--iris)">▸ scanning trace…</div></div>';
+      setTimeout(function(){
+        out.innerHTML=
+          '<div class="dbg-diag" style="padding:2px">'+
+          '<span class="vpill"><span class="d"></span>failure_detected</span>'+
+          '<div class="drow"><span class="k">root cause</span><span class="v"><span class="rc">tool_selection</span></span></div>'+
+          '<div class="drow"><span class="k">failed at</span><span class="v">step 2 · <em style="color:var(--iris);font-style:normal">search_web</em></span></div>'+
+          '<div class="drow"><span class="k">why</span><span class="v">query_db (local records) and search_web (external) had overlapping descriptions — the agent picked the external tool for a private record.</span></div>'+
+          '<div class="drow"><span class="k">fix</span><span class="v">Rewrite the tool descriptions so each tool\'s domain is unambiguous.</span></div>'+
+          '<div class="drow"><span class="k">confidence</span><span class="v">0.90</span></div>'+
+          '<div class="imp" style="margin-top:10px;padding-top:10px;border-top:1px dashed var(--line2);color:var(--dim);font-size:12px">impact&nbsp;&nbsp;wasted ~<b style="color:var(--warn)">430 tokens · $0.0021</b></div>'+
+          '</div>';
+      }, reduce?60:700);
+    }
+    runBtn.addEventListener("click", runDemo);
+    diagBtn.addEventListener("click", function(){ if(!diagBtn.disabled) diagnoseDemo(); });
+
+    /* ---- install / integrations tabs ---- */
+    var SNIPPETS=[
+      {id:"Install",body:'<pre><span class="pr">$</span> pip install runlens\n<span class="pr">$</span> agentlens demo        <span class="cm"># full diagnosis in 10s — no API key</span></pre>'},
+      {id:"Anthropic",body:'<pre><span class="kw">import</span> agentlens\nagentlens.<span class="fn">init</span>()\n\n<span class="kw">import</span> anthropic\nclient = anthropic.<span class="fn">Anthropic</span>()      <span class="cm"># captured from here on</span>\n\n<span class="kw">@agentlens.run</span>(name=<span class="st">"my_agent"</span>)\n<span class="kw">def</span> <span class="fn">run_agent</span>(query):\n    <span class="kw">return</span> client.messages.<span class="fn">create</span>(\n        model=<span class="st">"claude-3-5-sonnet-latest"</span>,\n        max_tokens=<span class="st">512</span>,\n        messages=[{<span class="st">"role"</span>: <span class="st">"user"</span>, <span class="st">"content"</span>: query}],\n    )</pre>'},
+      {id:"OpenAI",body:'<pre><span class="kw">import</span> agentlens\nagentlens.<span class="fn">init</span>()\n\n<span class="kw">from</span> openai <span class="kw">import</span> AsyncOpenAI\nclient = <span class="fn">AsyncOpenAI</span>()          <span class="cm"># async captured automatically</span>\n\n<span class="kw">@agentlens.run</span>(name=<span class="st">"openai_agent"</span>)\n<span class="kw">async def</span> <span class="fn">run_agent</span>(query):\n    <span class="kw">return await</span> client.chat.completions.<span class="fn">create</span>(\n        model=<span class="st">"gpt-4o-mini"</span>,\n        messages=[{<span class="st">"role"</span>: <span class="st">"user"</span>, <span class="st">"content"</span>: query}],\n    )</pre>'},
+      {id:"LangGraph",body:'<pre><span class="kw">import</span> agentlens\nagentlens.<span class="fn">init</span>()\nagentlens.<span class="fn">patch_langgraph</span>()      <span class="cm"># call before graph.compile()</span>\n\n<span class="kw">from</span> langgraph.graph <span class="kw">import</span> StateGraph\ngraph = <span class="fn">StateGraph</span>(MyState)\ngraph.<span class="fn">add_node</span>(<span class="st">"planner"</span>, planner_fn)\napp = graph.<span class="fn">compile</span>()          <span class="cm"># all nodes traced</span></pre>'},
+      {id:"Diagnose",body:'<pre><span class="pr">$</span> agentlens runs list\n<span class="pr">$</span> agentlens diagnose <span class="out">&lt;run_id&gt;</span>\n\n<span class="out">ROOT CAUSE   tool_selection</span>\n<span class="out">FAILED AT    step 2 (search_web)</span>\n<span class="out">FIX          rewrite the tool descriptions</span>\n<span class="out">CONFIDENCE   0.90</span>\n<span class="out">IMPACT       ~430 tokens / $0.0021 wasted</span></pre>'}
+    ];
+    var tabs=document.getElementById("tabs"), termBody=document.getElementById("termBody");
+    function showTab(i){ Array.prototype.forEach.call(tabs.children,function(el,idx){el.classList.toggle("active",idx===i);el.setAttribute("aria-selected",idx===i?"true":"false");}); termBody.innerHTML=SNIPPETS[i].body; }
+    SNIPPETS.forEach(function(s,i){ var b=document.createElement("button"); b.className="tab"; b.setAttribute("role","tab"); b.textContent=s.id; b.addEventListener("click",function(){showTab(i);}); tabs.appendChild(b); });
+    showTab(0);
+
+    /* ---- CLI switcher ---- */
+    var CLI=[
+      {c:"agentlens demo",ph:"# capture + diagnose a broken agent, no API key",out:"Captured demo run → 6ca115e7\n\nROOT CAUSE   tool_selection\nFAILED AT    step 2 (search_web)\nCONFIDENCE   0.90\nIMPACT       ~430 tokens / $0.0021"},
+      {c:"agentlens runs list",ph:"# recent runs with execution + diagnosis status",out:"run_id     name            execution  diagnosis          spans\n6ca115e7   support_agent   completed  loop               9\n5cb9d62e   router_agent    completed  healthy            4\n029b1361   scraper_agent   error      uncertain          7"},
+      {c:"agentlens diagnose <id>",ph:"# root cause, failed step, fix, confidence, cost",out:"ROOT CAUSE   loop\nFAILED AT    step 4 (query_db)\nWHY          step 4 repeats the tool+input first used at step 2\nFIX          add a stop condition / dedupe identical calls\nCONFIDENCE   0.95\nIMPACT       ~1,240 tokens / $0.0031 wasted"},
+      {c:"agentlens runs view <id>",ph:"# open the visual timeline in your browser",out:"Opening timeline for 6ca115e7 in your browser…\n(spans, tool calls, and the failed step, laid out on a timeline)"},
+      {c:"agentlens similar <id>",ph:"# find historically similar failures",out:"3 similar failures found:\n  b4c4329f   tool_selection   0.88 similar\n  918adf20   tool_selection   0.81 similar\n  77c1e0aa   loop             0.64 similar"},
+      {c:"agentlens clusters",ph:"# failure clusters across all runs",out:"tool_selection   12 runs   top fix: distinct tool descriptions\nloop              7 runs   top fix: add stop conditions\ncascade           4 runs   top fix: validate upstream output"},
+      {c:"agentlens stats",ph:"# token usage, latency and cost across runs",out:"runs 142   failures 38   failure rate 27%\ntokens 1.2M   wasted 41K   cost $1.84 wasted"},
+      {c:"agentlens doctor",ph:"# environment health check",out:"✓ package import\n✓ provider patches\n✓ diagnosis engine\n✓ evaluation fixtures\nResult: healthy"}
+    ];
+    var cliCmds=document.getElementById("cliCmds"), cliOut=document.getElementById("cliOut"), cliPh=document.getElementById("cliPh");
+    function showCli(i){ Array.prototype.forEach.call(cliCmds.children,function(el,idx){el.classList.toggle("active",idx===i);}); cliPh.textContent="$ "+CLI[i].c; cliOut.textContent=CLI[i].ph+"\n\n"+CLI[i].out; }
+    CLI.forEach(function(x,i){ var b=document.createElement("button"); b.className="cli-cmd"; b.setAttribute("role","tab"); b.textContent=x.c; b.addEventListener("click",function(){showCli(i);}); cliCmds.appendChild(b); });
+    showCli(0);
+  })();
+  </script>
 </body>
 </html>
