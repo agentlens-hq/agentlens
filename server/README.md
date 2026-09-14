@@ -1,15 +1,28 @@
 # AgentLens hosted backend
 
-The server side of AgentLens. It receives anonymized run uploads (the output of
-`agentlens upload prepare`), diagnoses them server-side with the validated engine,
-stores them in SQLite with indexed columns, and serves a dashboard + JSON API.
+The server side of AgentLens — **a standalone project.** It receives anonymized
+run uploads (the output of `agentlens upload prepare`), diagnoses them server-side
+with the validated engine (the published `runlens` package), stores them in SQLite
+with indexed columns, and serves a dashboard + JSON API.
+
+It depends on `runlens` for the diagnosis engine but is otherwise independent of
+the SDK — deploy it on its own host without the dev monorepo.
 
 ## Run
 
+**Standalone (deploy):**
+
+```bash
+cd server
+pip install -r requirements.txt
+uvicorn app:app --host 0.0.0.0 --port 8000     # http://localhost:8000/dashboard
+```
+
+**From the monorepo (dev):**
+
 ```bash
 pip install -e '.[server]'
-uvicorn server.app:app --reload          # http://localhost:8000
-open http://localhost:8000/dashboard
+uvicorn server.app:app --reload
 ```
 
 DB path defaults to `.agentlens_server.db`; override with `AGENTLENS_DB`.

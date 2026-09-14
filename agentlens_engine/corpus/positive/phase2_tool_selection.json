@@ -1,0 +1,90 @@
+{
+  "run_id": "phase2_tool_selection",
+  "name": "tool_selection_case",
+  "started_at": "2026-05-07T04:00:00+00:00",
+  "ended_at": "2026-05-07T04:05:00+00:00",
+  "status": "error",
+  "spans": [
+    {
+      "type": "llm_call",
+      "provider": "anthropic",
+      "model": "claude-3-5-sonnet-latest",
+      "latency_ms": 18.4,
+      "input_messages": [
+        {
+          "role": "user",
+          "content": "Find renewal status for customer:alex using local records."
+        }
+      ],
+      "tools": [
+        {
+          "name": "search_web",
+          "description": "find info about a topic"
+        },
+        {
+          "name": "query_db",
+          "description": "find info about a topic"
+        }
+      ],
+      "response_content": [
+        {
+          "type": "text",
+          "text": "The tools look equivalent, so I will use search_web."
+        }
+      ],
+      "stop_reason": "tool_use",
+      "usage": {
+        "input_tokens": 320,
+        "output_tokens": 64
+      },
+      "id": "phase2_tool_selection_span_1",
+      "run_id": "phase2_tool_selection",
+      "ts": "2026-05-07T04:01:00+00:00"
+    },
+    {
+      "type": "tool_call",
+      "tool_name": "search_web",
+      "input": {
+        "query": "customer:alex renewal status"
+      },
+      "output": null,
+      "tool_use_id": "toolu_search_web",
+      "expected_tool": "query_db",
+      "id": "phase2_tool_selection_span_2",
+      "run_id": "phase2_tool_selection",
+      "ts": "2026-05-07T04:02:00+00:00"
+    },
+    {
+      "type": "tool_call",
+      "tool_name": "search_web",
+      "input": {
+        "query": "customer:alex renewal status"
+      },
+      "output": {
+        "status": "error",
+        "error": "Wrong tool. Customer records are only available in query_db."
+      },
+      "tool_use_id": "toolu_search_web",
+      "expected_tool": "query_db",
+      "id": "phase2_tool_selection_span_3",
+      "run_id": "phase2_tool_selection",
+      "ts": "2026-05-07T04:03:00+00:00"
+    },
+    {
+      "type": "error",
+      "error": "Wrong tool. Customer records are only available in query_db.",
+      "context": {
+        "tool_name": "search_web",
+        "expected_tool": "query_db"
+      },
+      "id": "phase2_tool_selection_span_4",
+      "run_id": "phase2_tool_selection",
+      "ts": "2026-05-07T04:04:00+00:00"
+    }
+  ],
+  "expected_diagnosis": {
+    "root_cause_category": "tool_selection",
+    "failed_at_step": 2
+  },
+  "evaluation_kind": "synthetic"
+}

@@ -1,0 +1,8 @@
+include README.md LICENSE pyproject.toml CHANGELOG.md
+include docs/release_verification.md docs/audit_repair_report.md
+include server/app.py
+recursive-include agentlens_engine/corpus *.json
+recursive-include examples *.py
+recursive-include tests *.py *.json
+exclude codex.md .env agentlens_run.json
+prune .agentlens

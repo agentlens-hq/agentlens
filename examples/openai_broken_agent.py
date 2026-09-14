@@ -5,6 +5,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 import os
+import json
 from pathlib import Path
 import sys
 import types
@@ -13,7 +14,7 @@ from typing import Any
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 import agentlens
-from examples.shared_tools import search_web
+from examples.shared_tools import dispatch_tool
 
 
 @dataclass
@@ -108,15 +109,15 @@ def run_agent(query: str) -> None:
         tools=tools,
     )
 
-    tool_call = response.choices[0].message["tool_calls"][0]
-    query_input = {"query": "customer:alex renewal status"}
-    result = search_web(query_input["query"])
-    agentlens.record_tool_result(
-        tool_name=tool_call["function"]["name"],
-        input=query_input,
-        output=result,
-        tool_use_id=tool_call["id"],
-    )
+    message = response.choices[0].message
+    calls = message.get("tool_calls", []) if isinstance(message, dict) else message.tool_calls or []
+    for call in calls:
+        data = call if isinstance(call, dict) else call.model_dump()
+        function = data["function"]
+        tool_input = json.loads(function["arguments"])
+        result = dispatch_tool(function["name"], tool_input)
+        agentlens.record_tool_result(tool_name=function["name"], input=tool_input,
+                                    output=result, tool_use_id=data["id"])
 
 
 def main() -> None:

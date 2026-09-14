@@ -3,21 +3,14 @@
 from __future__ import annotations
 
 import argparse
-from datetime import datetime
 import importlib
 import json
-import re
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-from agentlens_engine.clustering import cluster_failures, print_clusters
-from agentlens_engine.diagnose import diagnose_run
-from agentlens_engine.evaluate import evaluate_cases, print_evaluation
-from agentlens_engine.hallucination import hallucination_summary
-from agentlens_engine.impact import impact_summary
-from agentlens_engine.similarity import find_similar_failures
-from agentlens_engine.status import run_status
-from agentlens_engine.timeline import generate_html
+from agentlens_core.privacy import anonymize, residual
+from agentlens_core.storage import atomic_write, safe_path
 from agentlens_sdk import (
     AgentLensClient,
     get_trace_context,
@@ -30,7 +23,7 @@ from agentlens_sdk import (
     run,
     save_run,
 )
-from agentlens_sdk.collector import RUNS_DIR, AmbiguousRunIdError
+from agentlens_sdk.collector import RUNS_DIR, AmbiguousRunIdError, InvalidRunFilesError
 
 __all__ = [
     "AgentLensClient",
@@ -43,21 +36,33 @@ __all__ = [
     "save_run",
 ]
 
-CLI_COMMANDS = {
-    "runs",
-    "diagnose",
-    "anonymize",
-    "upload",
-    "feedback-template",
-    "evaluate",
-    "doctor",
-    "stats",
-    "demo",
-    "watch",
-}
+def _lazy(module: str, name: str):
+    def call(*args, **kwargs):
+        return getattr(importlib.import_module(module), name)(*args, **kwargs)
+    return call
+
+cluster_failures = _lazy("agentlens_engine.clustering", "cluster_failures")
+print_clusters = _lazy("agentlens_engine.clustering", "print_clusters")
+diagnose_run = _lazy("agentlens_engine.diagnose", "diagnose_run")
+evaluate_cases = _lazy("agentlens_engine.evaluate", "evaluate_cases")
+print_evaluation = _lazy("agentlens_engine.evaluate", "print_evaluation")
+hallucination_summary = _lazy("agentlens_engine.hallucination", "hallucination_summary")
+impact_summary = _lazy("agentlens_engine.impact", "impact_summary")
+find_similar_failures = _lazy("agentlens_engine.similarity", "find_similar_failures")
+run_status = _lazy("agentlens_engine.status", "run_status")
+generate_html = _lazy("agentlens_engine.timeline", "generate_html")
 
 
 def main() -> None:
+    try:
+        _dispatch()
+    except (ValueError, OSError, UnicodeError, RecursionError) as exc:
+        import sys
+        print(f"Error: {exc}", file=sys.stderr)
+        raise SystemExit(1) from None
+
+
+def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="agentlens")
     subparsers = parser.add_subparsers(dest="command")
 
@@ -78,6 +83,7 @@ def main() -> None:
 
     diagnose_parser = subparsers.add_parser("diagnose")
     diagnose_parser.add_argument("run_id")
+    diagnose_parser.add_argument("--provider", choices=["openai", "anthropic"], help="Explicitly send a redacted compact trace to this provider; default is offline")
     similar_parser = subparsers.add_parser("similar")
     similar_parser.add_argument("run_id")
     similar_parser.add_argument("--top", type=int, default=5)
@@ -108,6 +114,11 @@ def main() -> None:
     watch_parser = subparsers.add_parser("watch")
     watch_parser.add_argument("--interval", type=float, default=0.5, help="Poll interval in seconds")
 
+    return parser
+
+
+def _dispatch() -> None:
+    parser = _parser()
     args = parser.parse_args()
 
     if args.command == "demo":
@@ -143,7 +154,7 @@ def main() -> None:
         return
 
     if args.command == "diagnose":
-        _print_diagnosis(args.run_id)
+        _print_diagnosis(args.run_id, provider=args.provider)
         return
 
     if args.command == "upload" and args.upload_command == "prepare":
@@ -171,7 +182,11 @@ def main() -> None:
         return
 
     if args.command == "evaluate":
-        print_evaluation(evaluate_cases())
+        report = evaluate_cases()
+        print_evaluation(report)
+        if (report.get('fixture_cases', 0) != 6 or not report.get("scored_cases")
+                or report.get("overall_accuracy", 0) < 1 or report.get("case_errors") or report.get("unscored_cases")):
+            raise SystemExit(1)
         return
 
     if args.command == "doctor":
@@ -182,8 +197,14 @@ def main() -> None:
 
 
 def _print_runs_list() -> None:
-    runs = load_runs()
+    failure = None
+    try:
+        runs = load_runs()
+    except InvalidRunFilesError as exc:
+        runs, failure = exc.runs, exc
     if not runs:
+        if failure:
+            raise failure
         print("No AgentLens runs found in .agentlens/runs/")
         return
 
@@ -206,6 +227,8 @@ def _print_runs_list() -> None:
             f"{item.get('started_at', '')[:25]:25}  "
             f"{len(item.get('spans', []))}"
         )
+    if failure:
+        raise failure
 
 
 def _print_run_detail(run_id: str) -> None:
@@ -239,7 +262,7 @@ def _print_run_detail(run_id: str) -> None:
             continue
 
         span_type = span.get("type")
-        print(f"[{index}] {span_type}")
+        print(f"[{span.get('original_index', index)}] {span_type}")
         if span_type == "llm_call":
             print(f"Provider: {span.get('provider')}")
             print(f"Model: {span.get('model')}")
@@ -265,16 +288,15 @@ def _compact(value: Any) -> str:
     return text if len(text) <= 500 else text[:497] + "..."
 
 
-def _print_diagnosis(run_id: str) -> None:
+def _print_diagnosis(run_id: str, provider: str | None = None) -> None:
     item = _load_run_or_report(run_id)
     if item is None:
         return
 
     try:
-        diagnosis = diagnose_run(item)
+        diagnosis = diagnose_run(item, provider=provider)
     except ValueError as exc:
-        print(f"Diagnosis failed: {exc}")
-        return
+        raise ValueError(f"Diagnosis failed: {exc}") from exc
     if diagnosis.get("confidence", 0) < 0.6:
         print("AgentLens Diagnosis")
         print("===================")
@@ -287,7 +309,8 @@ def _print_diagnosis(run_id: str) -> None:
         print(diagnosis.get("low_confidence_message"))
         print("We are not treating this as a final root cause yet.")
         print()
-        print("LIKELY CAUSES:")
+        print(f"EVIDENCE STRENGTH: {diagnosis.get('evidence_strength', 'insufficient')}")
+        print("POSSIBLE CAUSES (only if supported):")
         for cause in diagnosis.get("likely_causes", [])[:2]:
             print(f"- {cause}")
         print()
@@ -323,7 +346,8 @@ def _print_diagnosis(run_id: str) -> None:
     else:
         print("  None")
     print()
-    print(f"CONFIDENCE: {diagnosis['confidence']:.2f}")
+    print(f"EVIDENCE STRENGTH: {diagnosis.get('evidence_strength', 'unknown')}")
+    print(f"Confidence score (not a calibrated probability): {diagnosis['confidence']:.2f}")
 
     impact = diagnosis.get("impact")
     if impact:
@@ -350,9 +374,8 @@ def _anonymize_run(run_id: str) -> None:
         return
 
     anonymized = _anonymize_value(item)
-    output_path = f"{item.get('run_id', run_id)}.anonymized.json"
-    with open(output_path, "w", encoding="utf-8") as handle:
-        json.dump(anonymized, handle, indent=2)
+    output_path = safe_path(Path.cwd(), item.get('run_id', run_id), '.anonymized.json')
+    atomic_write(output_path, anonymized)
     print(f"Wrote anonymized trace to {output_path}")
     print("Review it before sharing. AgentLens removes obvious secrets, but you know your data best.")
 
@@ -370,21 +393,19 @@ _RESIDUAL_PII_PATTERNS = {
 
 def _residual_pii(anonymized: dict[str, Any]) -> list[str]:
     """Return the kinds of PII still present in an anonymized payload (should be none)."""
-    blob = json.dumps(anonymized, default=str)
-    return [kind for kind, pattern in _RESIDUAL_PII_PATTERNS.items() if re.search(pattern, blob)]
+    return residual(anonymized)
 
 
 def _write_anonymized_run(item: dict[str, Any], out_dir: Path) -> Path | None:
     """Anonymize a run and write it for upload — but refuse if PII survived."""
     anonymized = _anonymize_value(item)
-    run_id = str(item.get("run_id") or "run")
+    run_id = item.get("run_id", "")
+    output_path = safe_path(out_dir, run_id, '.anonymized.json')
     leaks = _residual_pii(anonymized)
     if leaks:
         print(f"SKIPPED run '{run_id}': anonymized payload still contains {', '.join(leaks)} — not written.")
         return None
-    output_path = out_dir / f"{run_id}.anonymized.json"
-    with output_path.open("w", encoding="utf-8") as handle:
-        json.dump(anonymized, handle, indent=2)
+    atomic_write(output_path, anonymized)
     return output_path
 
 
@@ -410,8 +431,8 @@ def _prepare_anonymized_upload(run_id: str | None, out_dir: Path) -> None:
     out_dir.mkdir(parents=True, exist_ok=True)
     written = [path for item in runs if (path := _write_anonymized_run(item, out_dir))]
     manifest_path = out_dir / "manifest.json"
-    with manifest_path.open("w", encoding="utf-8") as handle:
-        json.dump(
+    atomic_write(
+        manifest_path,
             {
                 "payload_type": "agentlens_anonymized_runs",
                 "raw_upload_allowed": False,
@@ -419,8 +440,6 @@ def _prepare_anonymized_upload(run_id: str | None, out_dir: Path) -> None:
                 "skipped_count": len(runs) - len(written),
                 "files": [path.name for path in written],
             },
-            handle,
-            indent=2,
         )
 
     print(f"Prepared {len(written)} anonymized run(s) in {out_dir}")
@@ -428,9 +447,15 @@ def _prepare_anonymized_upload(run_id: str | None, out_dir: Path) -> None:
         print(f"Skipped {len(runs) - len(written)} run(s) that still contained PII after anonymization.")
     print(f"Wrote upload manifest to {manifest_path}")
     print("Raw .agentlens/runs/*.json files were not copied.")
+    if len(written) != len(runs):
+        raise SystemExit(1)
 
 
 def _print_feedback_template(run_id: str) -> None:
+    item = _load_run_or_report(run_id)
+    if item is None:
+        return
+    run_id = item.get("run_id", run_id)
     print(f"# AgentLens Feedback: {run_id}")
     print()
     print("## What broke?")
@@ -483,7 +508,7 @@ def _print_stats(run_id: str | None) -> None:
         print("No AgentLens runs found in .agentlens/runs/")
         return
 
-    summaries = [_summarize_run(item) for item in runs[:20]]
+    summaries = [_summarize_run(item) for item in runs]
     totals = _merge_stats(summaries)
 
     print("AgentLens Stats")
@@ -496,7 +521,8 @@ def _print_stats(run_id: str | None) -> None:
     print(f"Output tokens: {totals['output_tokens']}")
     print(f"Total tokens: {totals['total_tokens']}")
     print(f"Captured latency: {_format_ms(totals['latency_ms'])}")
-    print(f"Captured cost: {_format_cost(totals['cost_usd'])}")
+    print(f"Known cost subtotal: {_format_cost(totals['cost_usd'])}")
+    print(f"Calls with unknown pricing: {sum(s['unknown_cost_calls'] for s in summaries)}")
     print()
     print(f"{'run_id':36}  {'name':24}  {'status':8}  {'llm':>3}  {'tool':>4}  {'tokens':>8}  latency")
     for summary in summaries:
@@ -541,7 +567,8 @@ def _print_run_stats(item: dict[str, Any]) -> None:
         print("  Slowest step: unavailable")
     print()
     print("Cost:")
-    print(f"  Captured cost: {_format_cost(summary['cost_usd'])}")
+    print(f"  Known cost subtotal: {_format_cost(summary['cost_usd'])}")
+    print(f"  Calls with unknown pricing: {summary['unknown_cost_calls']}")
     if summary["cost_usd"] == 0:
         print("  Note: provider billing cost is not captured unless traces include cost_usd.")
     print()
@@ -593,7 +620,6 @@ def _print_similar(run_id: str, top_n: int = 5) -> None:
 def _print_clusters() -> None:
     """Show failure clusters across all runs."""
     all_runs = load_runs()
-    error_runs = [r for r in all_runs if r.get("status") in ("error", "failure")]
     clusters = cluster_failures(all_runs)
     print_clusters(clusters, total_runs=len(all_runs))
     if clusters:
@@ -617,29 +643,18 @@ def _open_timeline(run_id: str) -> None:
     ) as tmp:
         tmp.write(html)
         tmp_path = tmp.name
-    webbrowser.open(f"file://{tmp_path}")
-    print(f"Timeline opened in browser: {tmp_path}")
+    opened = webbrowser.open(Path(tmp_path).as_uri())
+    message = "Timeline opened in browser" if opened else "Browser could not open; timeline generated"
+    print(f"{message}: {tmp_path}")
 
 
 def _load_diagnosis_for(item: dict[str, Any]) -> dict[str, Any] | None:
     """Find a diagnosis for this run: saved file first, else offline diagnosis for failed runs."""
-    run_id = str(item.get("run_id") or "")
-    diag_path = Path(".agentlens") / "diagnoses" / f"{run_id}.json"
-    if diag_path.exists():
-        try:
-            return json.loads(diag_path.read_text(encoding="utf-8"))
-        except (json.JSONDecodeError, OSError):
-            pass
-    if item.get("status") in ("error", "failure"):
-        try:
-            return diagnose_run(item, use_llm=False)
-        except Exception:
-            return None
-    return None
+    return diagnose_run(item, use_llm=False)
 
 
 def _print_prompt_viewer(run_id: str, step: int | None = None) -> None:
-    """Print the exact LLM prompt(s) sent during a run in readable form."""
+    """Print captured prompt data, not a reconstruction of the provider wire request."""
     item = _load_run_or_report(run_id)
     if item is None:
         return
@@ -650,53 +665,36 @@ def _print_prompt_viewer(run_id: str, step: int | None = None) -> None:
         return
 
     if step is not None:
-        idx = step - 1
-        if idx < 0 or idx >= len(spans):
-            print(f"Step {step} out of range (run has {len(spans)} LLM call(s)).")
-            return
-        spans = [spans[idx]]
-        start_idx = idx
-    else:
-        start_idx = 0
+        spans = [span for span in spans if span.get("original_index") == step]
+        if not spans:
+            raise ValueError(f"No LLM span at original step {step}.")
 
     print(f"AgentLens LLM Prompt Viewer — {item.get('name', run_id)}")
     print("=" * 60)
 
     for offset, span in enumerate(spans):
-        step_num = start_idx + offset + 1
+        step_num = span.get("original_index", offset + 1)
         model = span.get("model") or "unknown"
         provider = span.get("provider") or ""
         print(f"\nStep {step_num}: {provider}/{model}")
         print("─" * 60)
 
+        for field in ("system", "instructions"):
+            if field in span:
+                print(f"[{field.upper()}]")
+                print(_prompt_content(span[field]))
+
         messages = span.get("input_messages") or []
         if messages:
             for msg in messages:
                 if not isinstance(msg, dict):
+                    print(_prompt_content(msg))
                     continue
-                role = (msg.get("role") or "unknown").upper()
-                content = msg.get("content")
-                if isinstance(content, str):
-                    body = content
-                elif isinstance(content, list):
-                    parts = []
-                    for block in content:
-                        if isinstance(block, dict):
-                            if block.get("type") == "text":
-                                parts.append(block.get("text", ""))
-                            elif block.get("type") == "tool_result":
-                                parts.append(f"[tool_result: {block.get('tool_use_id')}]")
-                            elif block.get("type") == "tool_use":
-                                parts.append(f"[tool_use: {block.get('name')}]")
-                            else:
-                                parts.append(json.dumps(block))
-                        else:
-                            parts.append(str(block))
-                    body = "\n".join(parts)
-                else:
-                    body = json.dumps(content, default=str)
+                role = str(msg.get("role") or msg.get("type") or "unknown").upper()
                 print(f"[{role}]")
-                print(body)
+                # Preserve call IDs, tool outputs and provider-specific message fields.
+                body = msg["content"] if set(msg) <= {"role", "content"} and "content" in msg else msg
+                print(_prompt_content(body))
                 print()
         else:
             print("(no messages captured)")
@@ -705,10 +703,7 @@ def _print_prompt_viewer(run_id: str, step: int | None = None) -> None:
         if tools:
             print(f"Tools available ({len(tools)}):")
             for t in tools:
-                if isinstance(t, dict):
-                    name = t.get("name") or (t.get("function") or {}).get("name") or "?"
-                    desc = t.get("description") or (t.get("function") or {}).get("description") or ""
-                    print(f"  • {name}" + (f" — {desc}" if desc else ""))
+                print(_prompt_content(t))
             print()
 
         resp = span.get("response_content")
@@ -734,11 +729,24 @@ def _print_prompt_viewer(run_id: str, step: int | None = None) -> None:
 
         usage = span.get("usage")
         cost = span.get("cost_usd") or 0
-        if isinstance(usage, dict) and (usage.get("input_tokens") or usage.get("prompt_tokens")):
-            inp = (usage.get("input_tokens") or 0) + (usage.get("prompt_tokens") or 0)
-            out = (usage.get("output_tokens") or 0) + (usage.get("completion_tokens") or 0)
+        if isinstance(usage, dict):
+            inp, out, _ = _usage_counts(usage)
             cost_str = f"  Cost: ${cost:.6f}" if cost > 0 else ""
             print(f"\n  Tokens: {inp} in / {out} out{cost_str}")
+
+
+def _prompt_content(value: Any) -> str:
+    return value if isinstance(value, str) else json.dumps(value, indent=2, default=str)
+
+
+def _usage_counts(usage: Any) -> tuple[int, int, int]:
+    """Provider aliases are alternatives, not additive counters; explicit zero is valid."""
+    if not isinstance(usage, dict):
+        return 0, 0, 0
+    inp = int(_number(usage.get("input_tokens", usage.get("prompt_tokens"))))
+    out = int(_number(usage.get("output_tokens", usage.get("completion_tokens"))))
+    total = inp + out if usage.get("total_tokens") is None else int(_number(usage["total_tokens"]))
+    return inp, out, total
 
 
 def _replay_run(run_id: str) -> None:
@@ -759,15 +767,16 @@ def _replay_run(run_id: str) -> None:
     print("Press ENTER to advance through each span. Ctrl+C to quit.")
 
     for i, span in enumerate(spans, start=1):
+        original_step = span.get("original_index", i)
         try:
-            input(f"\n[Press ENTER for step {i}/{len(spans)}]")
+            input(f"\n[Press ENTER for step {original_step} (span {i}/{len(spans)})]")
         except (KeyboardInterrupt, EOFError):
             print("\nReplay stopped.")
             return
 
         stype = span.get("type", "unknown")
         print(f"\n{'━' * 60}")
-        print(f"Step {i}/{len(spans)}  ·  {stype.upper()}")
+        print(f"Step {original_step} (span {i}/{len(spans)})  ·  {stype.upper()}")
         print('━' * 60)
 
         if stype == "llm_call":
@@ -786,7 +795,7 @@ def _replay_run(run_id: str) -> None:
                 for msg in messages[-3:]:  # Show last 3 to keep it concise
                     if not isinstance(msg, dict):
                         continue
-                    role = (msg.get("role") or "?").upper()
+                    role = str(msg.get("role") or "?").upper()
                     content = msg.get("content", "")
                     body = content if isinstance(content, str) else json.dumps(content, default=str)
                     print(f"  [{role}] {body[:200]}{'…' if len(body) > 200 else ''}")
@@ -809,8 +818,8 @@ def _replay_run(run_id: str) -> None:
                             if block.get("type") == "tool_use":
                                 print(f"  ↳ Called tool: {block.get('name')}({json.dumps(block.get('input', {}), default=str)[:100]})")
                             elif block.get("type") == "text":
-                                text = (block.get("text") or "")[:150]
-                                print(f"  ↳ Response text: {text}{'…' if len(block.get('text',''))>150 else ''}")
+                                text = _prompt_content(block.get("text"))
+                                print(f"  ↳ Response text: {text[:150]}{'…' if len(text)>150 else ''}")
 
         elif stype == "tool_call":
             print(f"Tool   : {span.get('tool_name', '?')}")
@@ -858,7 +867,14 @@ def _print_stitch(run_id: str) -> None:
     def children_of(rid: str) -> list[dict[str, Any]]:
         return [r for r in all_runs if r.get("parent_run_id") == rid]
 
+    visited = {root.get("run_id")}
+
     def print_tree(r: dict[str, Any], prefix: str = "", is_last: bool = True) -> None:
+        rid = r.get("run_id")
+        if rid in visited:
+            print(f"{prefix}Cycle detected at run {rid}; stopping this branch.")
+            return
+        visited.add(rid)
         connector = "└── " if is_last else "├── "
         spans = r.get("spans") or []
         status = r.get("status", "?")
@@ -897,7 +913,12 @@ def _run_demo(open_browser: bool = True) -> None:
     Works offline, requires no API key — the agent is simulated through the real
     capture pipeline so the saved run is identical in shape to a live capture.
     """
-    from agentlens_sdk.collector import _current_run, _finalize_run, append_span, start_run
+    from agentlens_sdk.collector import (
+        _current_run,
+        _finalize_run,
+        append_span,
+        start_run,
+    )
 
     print("AgentLens Demo")
     print("=" * 60)
@@ -986,9 +1007,9 @@ def _run_demo(open_browser: bool = True) -> None:
     print("=" * 60)
     print("Next steps:")
     print(f"  agentlens runs view {run_id[:8]}     # visual timeline")
-    print(f"  agentlens runs prompt {run_id[:8]}   # exact prompts sent")
+    print(f"  agentlens runs prompt {run_id[:8]}   # captured prompt data")
     print()
-    print("Use it on your own agent — two lines:")
+    print("Enable capture, then use @agentlens.run(name=...) to group and save:")
     print("  import agentlens")
     print("  agentlens.init()   # before creating your Anthropic/OpenAI client")
     if open_browser:
@@ -998,83 +1019,30 @@ def _run_demo(open_browser: bool = True) -> None:
 
 
 def _watch_runs(interval: float = 0.5) -> None:
-    """Live mode: tail .agentlens/runs/ and print spans as agents execute."""
-    import time as _time
+    """Display changed saved snapshots; SDK completion/save_run controls persistence."""
+    import math
+    import time
 
-    colors = {
-        "llm_call": "\033[34m",       # blue
-        "tool_call": "\033[32m",      # green
-        "error": "\033[31m",          # red
-        "memory_snapshot": "\033[33m",  # amber
-        "langgraph_node": "\033[35m",   # purple
-        "langgraph_run": "\033[35m",
-    }
-    reset, dim = "\033[0m", "\033[2m"
+    from agentlens_core.watch import SnapshotWatcher
 
-    def describe(span: dict[str, Any]) -> str:
-        stype = span.get("type", "?")
-        color = colors.get(stype, "")
-        if stype == "llm_call":
-            u = span.get("usage") or {}
-            tok = (u.get("input_tokens", 0) or u.get("prompt_tokens", 0)) + (
-                u.get("output_tokens", 0) or u.get("completion_tokens", 0)
-            )
-            extra = f"  {tok} tok" if tok else ""
-            lat = span.get("latency_ms")
-            extra += f"  {lat:.0f}ms" if isinstance(lat, (int, float)) and lat else ""
-            return f"{color}llm_call{reset}   {span.get('model', '?')}{dim}{extra}{reset}"
-        if stype == "tool_call":
-            out = span.get("output")
-            bad = isinstance(out, dict) and (out.get("status") == "error" or out.get("error"))
-            mark = f"  {colors['error']}error result{reset}" if bad else ""
-            return f"{color}tool_call{reset}  {span.get('tool_name', '?')}{mark}"
-        if stype == "error":
-            return f"{color}error{reset}      {str(span.get('error', ''))[:80]}"
-        return f"{color}{stype}{reset}  {span.get('tool_name') or span.get('label') or ''}"
-
-    print(f"Watching {RUNS_DIR}/ for agent activity... (Ctrl+C to stop)", flush=True)
-    print()
-
-    seen: dict[str, int] = {}  # path -> span count already printed
-    announced: set[str] = set()
+    if not math.isfinite(interval) or interval <= 0:
+        raise ValueError("Watch interval must be finite and greater than zero.")
+    watcher = SnapshotWatcher(RUNS_DIR)
+    watcher.poll()  # Establish the baseline without replaying historical runs.
+    print(f"Watching saved snapshots in {RUNS_DIR} (not live provider events).")
     try:
         while True:
-            if RUNS_DIR.exists():
-                for path in sorted(RUNS_DIR.glob("*.json"), key=lambda p: p.stat().st_mtime):
-                    try:
-                        run_data = json.loads(path.read_text(encoding="utf-8"))
-                    except (json.JSONDecodeError, OSError):
-                        continue
-                    spans = [s for s in (run_data.get("spans") or []) if isinstance(s, dict)]
-                    key = str(path)
-                    if key not in seen:
-                        # Runs that existed before watch started are skipped;
-                        # only freshly written runs stream from span 0.
-                        seen[key] = 0 if _is_new(path) else len(spans)
-                    if seen[key] < len(spans):
-                        rid = (run_data.get("run_id") or path.stem)[:8]
-                        if key not in announced:
-                            status = run_data.get("status", "?")
-                            print(f"{dim}── run {rid}  {run_data.get('name', '')}{reset}", flush=True)
-                            announced.add(key)
-                        for i in range(seen[key], len(spans)):
-                            print(f"  {rid}  [{i + 1}] {describe(spans[i])}", flush=True)
-                        seen[key] = len(spans)
-                        if run_data.get("status") in ("error", "failure"):
-                            print(f"  {rid}  {colors['error']}run FAILED{reset} → agentlens diagnose {rid}", flush=True)
-            _time.sleep(interval)
+            for path, snapshot in watcher.poll():
+                if isinstance(snapshot, str):
+                    print(f"WARN {snapshot}")
+                    continue
+                print(f"Run {snapshot.get('run_id', path.stem)}: {snapshot.get('status', 'unknown')}")
+                for span in snapshot['spans']:
+                    print(f"  [{span['original_index']}] {span.get('type', '?')} "
+                          f"{span.get('tool_name') or span.get('model') or ''}")
+            time.sleep(interval)
     except KeyboardInterrupt:
-        print("\nStopped watching.", flush=True)
-
-
-def _is_new(path: Path) -> bool:
-    """True if the file was modified in the last 5 seconds."""
-    import time as _time
-
-    try:
-        return (_time.time() - path.stat().st_mtime) < 5
-    except OSError:
-        return False
+        print("Stopped watching.")
 
 
 def _load_run_or_report(run_id: str) -> dict[str, Any] | None:
@@ -1086,10 +1054,10 @@ def _load_run_or_report(run_id: str) -> dict[str, Any] | None:
             print(f"- {match}")
         if len(exc.matches) > 10:
             print(f"...and {len(exc.matches) - 10} more")
-        return None
+        raise SystemExit(1) from None
 
     if item is None:
-        print(f"Run not found: {run_id}")
+        raise ValueError(f"Run not found: {run_id}. Run agentlens runs list.")
     return item
 
 
@@ -1123,12 +1091,8 @@ def _summarize_run(item: dict[str, Any]) -> dict[str, Any]:
         if model:
             models[str(model)] = models.get(str(model), 0) + 1
 
-        usage = span.get("usage") if isinstance(span.get("usage"), dict) else {}
-        usage_input = _number(usage.get("input_tokens")) + _number(usage.get("prompt_tokens"))
-        usage_output = _number(usage.get("output_tokens")) + _number(usage.get("completion_tokens"))
-        usage_total = _number(usage.get("total_tokens"))
-        if usage_total == 0 and (usage_input or usage_output):
-            usage_total = usage_input + usage_output
+        usage = span.get("usage") if span.get("type") == "llm_call" else None
+        usage_input, usage_output, usage_total = _usage_counts(usage)
         input_tokens += int(usage_input)
         output_tokens += int(usage_output)
         total_tokens += int(usage_total)
@@ -1137,7 +1101,7 @@ def _summarize_run(item: dict[str, Any]) -> dict[str, Any]:
         latency_ms += span_latency
         if span_latency > 0 and span_latency > slowest_latency:
             slowest_latency = span_latency
-            slowest_step = _describe_span(index, span, span_latency)
+            slowest_step = _describe_span(span.get("original_index", index), span, span_latency)
 
         cost_usd += _extract_cost_usd(span)
 
@@ -1154,6 +1118,7 @@ def _summarize_run(item: dict[str, Any]) -> dict[str, Any]:
         "latency_ms": latency_ms,
         "duration_ms": _duration_ms(item.get("started_at"), item.get("ended_at")),
         "cost_usd": cost_usd,
+        "unknown_cost_calls": sum(s.get("type") == "llm_call" and s.get("cost_usd") is None for s in safe_spans),
         "slowest_step": slowest_step if slowest_latency >= 0 else "",
         "providers": providers,
         "models": models,
@@ -1198,20 +1163,9 @@ def _count_tool_invocations(spans: list[dict[str, Any]]) -> int:
 
 
 def _extract_cost_usd(value: Any) -> float:
-    if isinstance(value, dict):
-        total = 0.0
-        for key, item in value.items():
-            lowered = str(key).lower()
-            if lowered in {"cost_usd", "total_cost_usd"}:
-                total += _number(item)
-            elif lowered in {"cost", "total_cost"} and "token" not in lowered:
-                total += _number(item)
-            elif isinstance(item, (dict, list)):
-                total += _extract_cost_usd(item)
-        return total
-    if isinstance(value, list):
-        return sum(_extract_cost_usd(item) for item in value)
-    return 0.0
+    if not isinstance(value, dict) or value.get("type") != "llm_call":
+        return 0.0
+    return _number(value.get("cost_usd"))
 
 
 def _duration_ms(started_at: Any, ended_at: Any) -> float:
@@ -1222,7 +1176,10 @@ def _duration_ms(started_at: Any, ended_at: Any) -> float:
         ended = datetime.fromisoformat(ended_at.replace("Z", "+00:00"))
     except ValueError:
         return 0.0
-    return max((ended - started).total_seconds() * 1000, 0.0)
+    try:
+        return max((ended - started).total_seconds() * 1000, 0.0)
+    except TypeError:
+        return 0.0
 
 
 def _describe_span(index: int, span: dict[str, Any], latency_ms: float) -> str:
@@ -1290,6 +1247,7 @@ def _print_doctor() -> None:
 
     if any(check["status"] == "FAIL" for check in checks):
         print("Result: needs attention")
+        raise SystemExit(1)
     elif any(check["status"] == "WARN" for check in checks):
         print("Result: healthy with warnings")
     else:
@@ -1322,13 +1280,15 @@ def _doctor_imports() -> tuple[str, str]:
     if not callable(getattr(_al, "init", None)):
         return "FAIL", "agentlens.init is missing or not callable"
 
-    if not CLI_COMMANDS.issuperset({"doctor", "diagnose", "evaluate"}):
+    commands = next(action.choices for action in _parser()._actions if isinstance(action, argparse._SubParsersAction))
+    if not set(commands).issuperset({"doctor", "diagnose", "evaluate"}):
         return "FAIL", "required CLI commands are missing"
     return "PASS", ""
 
 
 def _doctor_local_storage() -> tuple[str, str]:
-    run_id = "agentlens_doctor_storage_check"
+    import uuid
+    run_id = "doctor_" + uuid.uuid4().hex
     RUNS_DIR.mkdir(parents=True, exist_ok=True)
     path = RUNS_DIR / f"{run_id}.json"
     payload = {
@@ -1340,7 +1300,7 @@ def _doctor_local_storage() -> tuple[str, str]:
         "spans": [],
     }
     try:
-        path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+        atomic_write(path, payload)
         loaded = load_run(run_id)
         if not loaded or loaded.get("run_id") != run_id:
             return "FAIL", "run JSON could not be read back"
@@ -1437,8 +1397,12 @@ def _doctor_evaluation() -> tuple[str, str]:
         return "FAIL", f"evaluation missing {', '.join(sorted(missing))}"
     if report["fixture_cases"] == 0:
         return "FAIL", "no fixture cases found"
-    if report["fixture_accuracy"] < 1.0:
-        return "FAIL", f"fixture accuracy {report['fixture_accuracy']:.0%}"
+    if report['fixture_cases'] != 6 or report.get('healthy_cases', 0) < 8:
+        return "FAIL", "required positive/healthy corpus is incomplete"
+    if report.get("case_errors") or report.get("unscored_cases"):
+        return "FAIL", "evaluation contains errors or unscored cases; run agentlens evaluate for details"
+    if report["fixture_accuracy"] < 1.0 or report.get('overall_accuracy', 0) < 1.0:
+        return "FAIL", "positive or healthy regression expectations failed"
     return "PASS", ""
 
 
@@ -1497,188 +1461,7 @@ def _doctor_tool_selection_run() -> dict[str, Any]:
 
 
 def _anonymize_value(value: Any) -> Any:
-    if isinstance(value, str):
-        return _anonymize_string(value)
-    if isinstance(value, list):
-        return [_anonymize_value(item) for item in value]
-    if isinstance(value, dict):
-        cleaned = {}
-        for key, item in value.items():
-            if _secret_key_name(str(key)):
-                cleaned[key] = "[REDACTED]"
-            elif _pii_value_key(str(key)):
-                cleaned[key] = "[PII]"
-            else:
-                cleaned[key] = _anonymize_value(item)
-        return cleaned
-    return value
-
-
-def _secret_key_name(key: str) -> bool:
-    lowered = key.lower()
-    # Auth credentials whose VALUE must be redacted by key name. "token" is matched
-    # only as a real auth-token field, not as a substring — otherwise legitimate
-    # token-COUNT fields (prompt_tokens, max_tokens, num_tokens, ...) get nuked.
-    auth_token_keys = {
-        "token", "access_token", "refresh_token", "auth_token",
-        "bearer_token", "session_token", "id_token", "auth", "bearer",
-    }
-    if lowered in auth_token_keys:
-        return True
-    markers = ("api_key", "apikey", "secret", "password", "authorization", "cookie")
-    return any(marker in lowered for marker in markers)
-
-
-def _pii_value_key(key: str) -> bool:
-    """Keys whose VALUE is personal data — redact the value, keep the key.
-
-    Deliberately specific so it never collides with diagnostic fields like
-    ``tool_name``, the run ``name``, or a tool definition's ``name``. Catches
-    personal data that arrives in labeled fields (DB rows, structured tool
-    output), which is where freeform names usually live.
-    """
-    return key.lower() in {
-        "full_name", "first_name", "last_name", "customer_name", "fullname",
-        "patient_name", "person_name", "street", "street_address", "home_address",
-        "mailing_address", "dob", "date_of_birth", "ssn", "social_security",
-        "phone_number", "credit_card", "card_number", "account_number",
-        "routing_number", "passport", "license_number",
-    }
-
-
-# PII patterns applied to every captured string. Order matters: longer/more
-# specific number patterns (card, SSN) run before shorter ones (phone) so they
-# do not partially match. IDs keep their prefix word so diagnostic signal
-# ("customer", "account") survives while the identifying value is removed.
-_PII_PATTERNS = [
-    # credentials / keys
-    (r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}", "[EMAIL]"),
-    (r"\bsk-[A-Za-z0-9_-]{12,}\b", "[API_KEY]"),
-    (r"\bsk-ant-[A-Za-z0-9_-]{12,}\b", "[API_KEY]"),
-    (r"\b(xox[baprs]-[A-Za-z0-9-]{10,})\b", "[TOKEN]"),
-    (r"\b(al_[A-Za-z0-9_-]{8,})\b", "[AGENTLENS_KEY]"),
-    (r"(?i)(bearer\s+)[A-Za-z0-9._-]{12,}", r"\1[TOKEN]"),
-    (r"(?i)(api[_-]?key\s*[:=]\s*)[A-Za-z0-9._-]{8,}", r"\1[API_KEY]"),
-    (r"(?i)(token\s*[:=]\s*)[A-Za-z0-9._-]{8,}", r"\1[TOKEN]"),
-    (r"(?i)(password\s*[:=]\s*)\S+", r"\1[PASSWORD]"),
-    (r"(?i)(secret\s*[:=]\s*)[A-Za-z0-9._-]{8,}", r"\1[SECRET]"),
-    # structured PII — specific before general
-    (r"\b(?:\d[ -]?){15,16}\b", "[CARD]"),                       # credit card (16 digits)
-    (r"\b\d{3}-\d{2}-\d{4}\b", "[SSN]"),                         # SSN
-    (r"(?:\+?1[-.\s]?)?\(?\d{3}\)?[-.\s]\d{3}[-.\s]\d{4}\b", "[PHONE]"),  # phone
-    (r"\b\d{1,3}(?:\.\d{1,3}){3}\b", "[IP]"),                    # IPv4
-    (r"\$\s?\d{1,3}(?:,\d{3})*(?:\.\d{2})?", "[AMOUNT]"),        # money
-    # identifiers — keep the leading word, drop the value
-    (r"(?i)\b(customer)\s*[:=]\s*\S+", r"\1:[ID]"),
-    (r"(?i)\b(acct|account)[_:\s-]*\w*\d{3,}\w*", r"\1_[ID]"),
-    (r"(?i)\b(user|users)\.(id)\s*[:=]\s*\d+", r"\1.\2=[ID]"),
-    # US street address
-    (r"\b\d{1,6}\s+[A-Z][\w.]*(?:\s+[A-Z][\w.]*)*\s+"
-     r"(?:St|Street|Ave|Avenue|Rd|Road|Blvd|Boulevard|Ln|Lane|Dr|Drive|Way|Ct|Court)\b"
-     r"(?:,?\s+[A-Z][a-zA-Z]+)*(?:,?\s+[A-Z]{2})?(?:\s+\d{5}(?:-\d{4})?)?", "[ADDRESS]"),
-]
-
-
-_NER_MODEL: Any = None
-_NER_CHECKED = False
-
-
-def _get_ner_model() -> Any:
-    """Load and cache a spaCy NER model for person-name detection, if available.
-
-    Optional dependency: install with `pip install spacy && python -m spacy
-    download en_core_web_sm` (or `pip install 'agentlens[pii]'`). If unavailable,
-    name redaction degrades to regex-only — we warn once and never crash.
-    """
-    global _NER_MODEL, _NER_CHECKED
-    if _NER_CHECKED:
-        return _NER_MODEL
-    _NER_CHECKED = True
-    try:
-        import spacy
-
-        _NER_MODEL = spacy.load("en_core_web_sm", disable=["parser", "lemmatizer"])
-    except Exception:
-        _NER_MODEL = None
-        print(
-            "Note: spaCy not installed — using the built-in common-name redactor "
-            "(catches 'Firstname Lastname' for common names). For broader coverage of "
-            "uncommon names install the optional extra: pip install 'agentlens[pii]' && "
-            "python -m spacy download en_core_web_sm"
-        )
-    return _NER_MODEL
-
-
-# Common first names (lowercased). Used by the dependency-free name redactor:
-# a capitalized "Firstname Lastname" sequence whose first token is a known first
-# name is almost certainly a person, while "San Francisco" / "Red Planet" / tool
-# names are not (their leading word is not a first name), so they are left alone.
-_COMMON_FIRST_NAMES = frozenset(
-    """
-    james john robert michael william david richard joseph thomas charles christopher
-    daniel matthew anthony mark donald steven paul andrew joshua kenneth kevin brian
-    george timothy ronald edward jason jeffrey ryan jacob gary nicholas eric jonathan
-    stephen larry justin scott brandon benjamin samuel gregory alexander patrick frank
-    raymond jack dennis jerry tyler aaron jose adam henry nathan douglas peter zachary
-    kyle walter ethan jeremy harold carl keith roger gerald sean austin arthur noah
-    lawrence jesse joe bryan billy jordan albert dylan bruce willie gabriel logan
-    alan juan wayne roy ralph randy eugene vincent russell louis philip bobby johnny
-    bradley mary patricia jennifer linda elizabeth barbara susan jessica sarah karen
-    nancy lisa margaret betty sandra ashley dorothy kimberly emily donna michelle carol
-    amanda melissa deborah stephanie rebecca laura sharon cynthia kathleen amy angela
-    shirley anna brenda pamela emma nicole helen samantha katherine christine debra
-    rachel carolyn janet maria catherine heather diane olivia julie joyce victoria
-    kelly christina joan evelyn lauren judith megan andrea cheryl hannah jacqueline
-    martha gloria teresa ann sara madison frances kathryn janice jean abigail alice
-    julia judy sophia grace denise amber marilyn danielle beverly isabella theresa diana
-    natalie brittany charlotte rose alexis kayla alex chris sam max leo
-    """.split()
-)
-
-_NAME_SEQUENCE_RE = re.compile(r"\b([A-Z][a-z]+)(?:\s+[A-Z]\.?)?(?:\s+[A-Z][a-z]+)+\b")
-
-
-def _redact_names_heuristic(text: str) -> str:
-    """Redact 'Firstname Lastname' sequences led by a known common first name.
-
-    Dependency-free fallback for when spaCy is unavailable. Conservative: requires
-    a multi-word capitalized sequence starting with a recognized first name, so
-    place names, tool names, and ordinary capitalized phrases are left untouched.
-    """
-    def _replace(match: "re.Match[str]") -> str:
-        if match.group(1).lower() in _COMMON_FIRST_NAMES:
-            return "[NAME]"
-        return match.group(0)
-
-    return _NAME_SEQUENCE_RE.sub(_replace, text)
-
-
-def _redact_person_names(text: str) -> str:
-    """Replace person names with [NAME]. Uses spaCy if available, else a
-    dependency-free gazetteer heuristic for common 'Firstname Lastname' names."""
-    if not text or not any(ch.isalpha() for ch in text):
-        return text
-    model = _get_ner_model()
-    if model is None:
-        return _redact_names_heuristic(text)
-    doc = model(text)
-    result = text
-    # Replace from the end so earlier character offsets stay valid.
-    for ent in sorted(
-        (e for e in doc.ents if e.label_ == "PERSON"),
-        key=lambda e: e.start_char,
-        reverse=True,
-    ):
-        result = result[: ent.start_char] + "[NAME]" + result[ent.end_char :]
-    return result
-
-
-def _anonymize_string(value: str) -> str:
-    cleaned = value
-    for pattern, replacement in _PII_PATTERNS:
-        cleaned = re.sub(pattern, replacement, cleaned)
-    cleaned = _redact_person_names(cleaned)
-    return cleaned
+    return anonymize(value)
 
 
 if __name__ == "__main__":

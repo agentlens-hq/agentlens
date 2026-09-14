@@ -13,7 +13,7 @@ from typing import Any
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 import agentlens
-from examples.shared_tools import search_web
+from examples.shared_tools import dispatch_tool
 
 
 @dataclass
@@ -108,9 +108,7 @@ def run_agent(query: str) -> None:
     tool_name = _block_attr(tool_use, "name")
     tool_input = _block_attr(tool_use, "input") or {}
     tool_use_id = _block_attr(tool_use, "id")
-    query_str = tool_input.get("query", "") if isinstance(tool_input, dict) else str(tool_input)
-
-    result = search_web(query_str)
+    result = dispatch_tool(tool_name, tool_input)
     agentlens.record_tool_result(
         tool_name=tool_name,
         input=tool_input,

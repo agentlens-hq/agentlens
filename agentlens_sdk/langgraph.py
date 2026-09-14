@@ -19,7 +19,9 @@ Usage::
     def run_agent(input):
         return app.invoke({"messages": input})
 
-Every node execution becomes a span. Invoke/stream/ainvoke/astream are all captured.
+Invoke/ainvoke capture aggregate results. Explicit stream_mode="updates" captures
+top-level node updates; other stream modes are passed through without node labels.
+Compile after patching. Existing compiled graphs and batch are not instrumented.
 """
 
 from __future__ import annotations
@@ -60,7 +62,7 @@ def patch_langgraph() -> bool:
         compiled = original_compile(self, *args, **kwargs)
         return _AgentLensCompiledGraph(compiled)
 
-    StateGraph.compile = patched_compile  # type: ignore[method-assign]
+    setattr(StateGraph, 'compile', patched_compile)
     _config["patched"].add("langgraph")
     return True
 
@@ -101,7 +103,7 @@ class _AgentLensCompiledGraph:
         nodes_seen: list[str] = []
         try:
             for chunk in self._compiled.stream(input, config=config, **kwargs):
-                if isinstance(chunk, dict):
+                if kwargs.get('stream_mode') == 'updates' and isinstance(chunk, dict):
                     for node_name, node_output in chunk.items():
                         nodes_seen.append(node_name)
                         append_span(
@@ -162,7 +164,7 @@ class _AgentLensCompiledGraph:
         nodes_seen: list[str] = []
         try:
             async for chunk in self._compiled.astream(input, config=config, **kwargs):
-                if isinstance(chunk, dict):
+                if kwargs.get('stream_mode') == 'updates' and isinstance(chunk, dict):
                     for node_name, node_output in chunk.items():
                         nodes_seen.append(node_name)
                         append_span(
@@ -197,6 +199,9 @@ class _AgentLensCompiledGraph:
     def __call__(self, *args: Any, **kwargs: Any) -> Any:
         """Support direct graph invocation: app(input) as well as app.invoke(input)."""
         return self.invoke(*args, **kwargs)
+
+    def with_config(self, *args: Any, **kwargs: Any) -> '_AgentLensCompiledGraph':
+        return _AgentLensCompiledGraph(self._compiled.with_config(*args, **kwargs))
 
     def __getattr__(self, name: str) -> Any:
         return getattr(self._compiled, name)

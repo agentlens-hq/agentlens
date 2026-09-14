@@ -1,0 +1,115 @@
+{
+  "run_id": "phase2_cascade",
+  "name": "cascade_case",
+  "started_at": "2026-05-07T04:00:00+00:00",
+  "ended_at": "2026-05-07T04:05:00+00:00",
+  "status": "error",
+  "spans": [
+    {
+      "type": "llm_call",
+      "provider": "openai",
+      "model": "gpt-4.1-mini",
+      "latency_ms": 18.4,
+      "input_messages": [
+        {
+          "role": "user",
+          "content": "Update the support ticket for customer:alex."
+        }
+      ],
+      "tools": [],
+      "response_content": {
+        "choices": [
+          {
+            "message": {
+              "content": "I will fetch the customer record."
+            }
+          }
+        ]
+      },
+      "stop_reason": "tool_use",
+      "usage": {
+        "input_tokens": 320,
+        "output_tokens": 64
+      },
+      "id": "phase2_cascade_span_1",
+      "run_id": "phase2_cascade",
+      "ts": "2026-05-07T04:01:00+00:00"
+    },
+    {
+      "type": "tool_call",
+      "tool_name": "lookup_customer",
+      "input": {
+        "customer": "alex"
+      },
+      "output": {
+        "status": "ok",
+        "customer_id": "stale-123",
+        "warning": "stale invalid id"
+      },
+      "tool_use_id": "toolu_lookup_customer",
+      "id": "phase2_cascade_span_2",
+      "run_id": "phase2_cascade",
+      "ts": "2026-05-07T04:02:00+00:00"
+    },
+    {
+      "type": "llm_call",
+      "provider": "openai",
+      "model": "gpt-4.1-mini",
+      "latency_ms": 18.4,
+      "input_messages": [
+        {
+          "role": "assistant",
+          "content": "Using stale customer_id stale-123 downstream."
+        }
+      ],
+      "tools": [],
+      "response_content": {
+        "choices": [
+          {
+            "message": {
+              "content": "I used stale customer_id stale-123 downstream."
+            }
+          }
+        ]
+      },
+      "stop_reason": "tool_use",
+      "usage": {
+        "input_tokens": 320,
+        "output_tokens": 64
+      },
+      "id": "phase2_cascade_span_3",
+      "run_id": "phase2_cascade",
+      "ts": "2026-05-07T04:03:00+00:00"
+    },
+    {
+      "type": "tool_call",
+      "tool_name": "update_ticket",
+      "input": {
+        "customer_id": "stale-123"
+      },
+      "output": {
+        "status": "error",
+        "error": "invalid id from corrupted later step"
+      },
+      "tool_use_id": "toolu_update_ticket",
+      "id": "phase2_cascade_span_4",
+      "run_id": "phase2_cascade",
+      "ts": "2026-05-07T04:04:00+00:00"
+    },
+    {
+      "type": "error",
+      "error": "Bad tool output corrupted later steps.",
+      "context": {
+        "source_tool": "lookup_customer"
+      },
+      "id": "phase2_cascade_span_5",
+      "run_id": "phase2_cascade",
+      "ts": "2026-05-07T04:05:00+00:00"
+    }
+  ],
+  "expected_diagnosis": {
+    "root_cause_category": "cascade",
+    "failed_at_step": 2
+  },
+  "evaluation_kind": "synthetic"
+}

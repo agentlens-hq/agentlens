@@ -7,7 +7,13 @@ from pathlib import Path
 from unittest.mock import patch
 
 from agentlens_engine.diagnose import diagnose_run
-from agentlens_sdk.collector import AmbiguousRunIdError, append_span, load_run, load_runs, run
+from agentlens_sdk.collector import (
+    AmbiguousRunIdError,
+    append_span,
+    load_run,
+    load_runs,
+    run,
+)
 
 
 class TempCwdTestCase(unittest.TestCase):
@@ -77,15 +83,16 @@ class DiagnosisSourceTests(unittest.TestCase):
         llm_diagnosis = {
             "root_cause_category": "tool_selection",
             "confidence": 0.9,
-            "failed_at_step": 2,
+            "failed_at_step": 1,
             "failed_at_tool": "search_web",
             "explanation": "The wrong tool was selected.",
             "fix": "Rewrite the tool descriptions.",
             "secondary_issues": [],
+            'evidence': [{'step': 1, 'field': 'output', 'quote': 'wrong tool'}],
         }
 
         with patch("agentlens_engine.diagnose._diagnose_with_llm", return_value=llm_diagnosis):
-            diagnosis = diagnose_run({"run_id": "llm", "spans": []}, use_llm=True)
+            diagnosis = diagnose_run({"run_id": "llm", "spans": [{'type': 'tool_call', 'tool_name': 'search_web', 'output': 'wrong tool'}]}, provider='openai')
 
         self.assertEqual(diagnosis["diagnosis_source"], "llm")
 

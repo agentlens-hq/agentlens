@@ -1,0 +1,21 @@
+{
+  "run_id": "conflicting_reports",
+  "status": "success",
+  "spans": [
+    {
+      "type": "llm_call",
+      "input_messages": [
+        {
+          "role": "user",
+          "content": "Summarize conflicting reports"
+        }
+      ],
+      "response_content": "The reports disagree."
+    }
+  ],
+  "evaluation_kind": "synthetic",
+  "expected_diagnosis": {
+    "root_cause_category": "unknown",
+    "failed_at_step": 0
+  }
+}

@@ -1,0 +1,8 @@
+# AgentLens hosted backend — standalone deploy dependencies.
+# This service is its own project: it depends on the published `runlens` package
+# for the diagnosis engine, plus a web server. Deploy it anywhere with:
+#   pip install -r requirements.txt
+#   uvicorn app:app --host 0.0.0.0 --port 8000
+runlens>=0.1.0
+fastapi>=0.110
+uvicorn[standard]>=0.29

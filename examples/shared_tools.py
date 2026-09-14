@@ -11,3 +11,14 @@ def search_web(query: str) -> dict[str, Any]:
         "error": "Network access disabled. Customer records are only available in query_db.",
         "query": query,
     }
+
+
+def query_db(query: str) -> dict[str, Any]:
+    return {"status": "success", "renewal_status": "active", "query": query}
+
+
+def dispatch_tool(name: str, arguments: dict[str, Any]) -> dict[str, Any]:
+    tools = {"search_web": search_web, "query_db": query_db}
+    if name not in tools:
+        return {"error": f"Unknown tool: {name}"}
+    return tools[name](**arguments)

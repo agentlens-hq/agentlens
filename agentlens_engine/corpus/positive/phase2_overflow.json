@@ -1,0 +1,94 @@
+{
+  "run_id": "phase2_overflow",
+  "name": "overflow_case",
+  "started_at": "2026-05-07T04:00:00+00:00",
+  "ended_at": "2026-05-07T04:05:00+00:00",
+  "status": "error",
+  "spans": [
+    {
+      "type": "llm_call",
+      "provider": "anthropic",
+      "model": "claude-3-5-sonnet-latest",
+      "latency_ms": 18.4,
+      "input_messages": [
+        {
+          "role": "user",
+          "content": "Use customer_id cust_123 to cancel renewal."
+        }
+      ],
+      "tools": [],
+      "response_content": [
+        {
+          "type": "text",
+          "text": "I will gather more context before cancelling."
+        }
+      ],
+      "stop_reason": "tool_use",
+      "usage": {
+        "input_tokens": 320,
+        "output_tokens": 64
+      },
+      "id": "phase2_overflow_span_1",
+      "run_id": "phase2_overflow",
+      "ts": "2026-05-07T04:01:00+00:00"
+    },
+    {
+      "type": "llm_call",
+      "provider": "anthropic",
+      "model": "claude-3-5-sonnet-latest",
+      "latency_ms": 18.4,
+      "input_messages": [
+        {
+          "role": "assistant",
+          "content": "Large transcript added. Important customer_id was pushed out."
+        }
+      ],
+      "tools": [],
+      "response_content": [
+        {
+          "type": "text",
+          "text": "The context window truncated the earlier customer_id."
+        }
+      ],
+      "stop_reason": "tool_use",
+      "usage": {
+        "input_tokens": 320,
+        "output_tokens": 64
+      },
+      "id": "phase2_overflow_span_2",
+      "run_id": "phase2_overflow",
+      "ts": "2026-05-07T04:02:00+00:00"
+    },
+    {
+      "type": "tool_call",
+      "tool_name": "cancel_renewal",
+      "input": {
+        "customer_id": null
+      },
+      "output": {
+        "status": "error",
+        "error": "missing customer_id because earlier context was pushed out"
+      },
+      "tool_use_id": "toolu_cancel_renewal",
+      "id": "phase2_overflow_span_3",
+      "run_id": "phase2_overflow",
+      "ts": "2026-05-07T04:03:00+00:00"
+    },
+    {
+      "type": "error",
+      "error": "Important context was pushed out of the context window before the final tool call.",
+      "context": {
+        "lost_fact": "customer_id cust_123",
+        "tool_name": "cancel_renewal"
+      },
+      "id": "phase2_overflow_span_4",
+      "run_id": "phase2_overflow",
+      "ts": "2026-05-07T04:04:00+00:00"
+    }
+  ],
+  "expected_diagnosis": {
+    "root_cause_category": "overflow",
+    "failed_at_step": 2
+  },
+  "evaluation_kind": "synthetic"
+}

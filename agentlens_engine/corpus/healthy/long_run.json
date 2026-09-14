@@ -1,0 +1,1016 @@
+{
+  "run_id": "long_run",
+  "status": "success",
+  "spans": [
+    {
+      "id": "0",
+      "type": "llm_call",
+      "response_content": "Done"
+    },
+    {
+      "id": "1",
+      "type": "llm_call",
+      "response_content": "Done"
+    },
+    {
+      "id": "2",
+      "type": "llm_call",
+      "response_content": "Done"
+    },
+    {
+      "id": "3",
+      "type": "llm_call",
+      "response_content": "Done"
+    },
+    {
+      "id": "4",
+      "type": "llm_call",
+      "response_content": "Done"
+    },
+    {
+      "id": "5",
+      "type": "llm_call",
+      "response_content": "Done"
+    },
+    {
+      "id": "6",
+      "type": "llm_call",
+      "response_content": "Done"
+    },
+    {
+      "id": "7",
+      "type": "llm_call",
+      "response_content": "Done"
+    },
+    {
+      "id": "8",
+      "type": "llm_call",
+      "response_content": "Done"
+    },
+    {
+      "id": "9",
+      "type": "llm_call",
+      "response_content": "Done"
+    },
+    {
+      "id": "10",
+      "type": "llm_call",
+      "response_content": "Done"
+    },
+    {
+      "id": "11",
+      "type": "llm_call",
+      "response_content": "Done"
+    },
+    {
+      "id": "12",
+      "type": "llm_call",
+      "response_content": "Done"
+    },
+    {
+      "id": "13",
+      "type": "llm_call",
+      "response_content": "Done"
+    },
+    {
+      "id": "14",
+      "type": "llm_call",
+      "response_content": "Done"
+    },
+    {
+      "id": "15",
+      "type": "llm_call",
+      "response_content": "Done"
+    },
+    {
+      "id": "16",
+      "type": "llm_call",
+      "response_content": "Done"
+    },
+    {
+      "id": "17",
+      "type": "llm_call",
+      "response_content": "Done"
+    },
+    {
+      "id": "18",
+      "type": "llm_call",
+      "response_content": "Done"
+    },
+    {
+      "id": "19",
+      "type": "llm_call",
+      "response_content": "Done"
+    },
+    {
+      "id": "20",
+      "type": "llm_call",
+      "response_content": "Done"
+    },
+    {
+      "id": "21",
+      "type": "llm_call",
+      "response_content": "Done"
+    },
+    {
+      "id": "22",
+      "type": "llm_call",
+      "response_content": "Done"
+    },
+    {
+      "id": "23",
+      "type": "llm_call",
+      "response_content": "Done"
+    },
+    {
+      "id": "24",
+      "type": "llm_call",
+      "response_content": "Done"
+    },
+    {
+      "id": "25",
+      "type": "llm_call",
+      "response_content": "Done"
+    },
+    {
+      "id": "26",
+      "type": "llm_call",
+      "response_content": "Done"
+    },
+    {
+      "id": "27",
+      "type": "llm_call",
+      "response_content": "Done"
+    },
+    {
+      "id": "28",
+      "type": "llm_call",
+      "response_content": "Done"
+    },
+    {
+      "id": "29",
+      "type": "llm_call",
+      "response_content": "Done"
+    },
+    {
+      "id": "30",
+      "type": "llm_call",
+      "response_content": "Done"
+    },
+    {
+      "id": "31",
+      "type": "llm_call",
+      "response_content": "Done"
+    },
+    {
+      "id": "32",
+      "type": "llm_call",
+      "response_content": "Done"
+    },
+    {
+      "id": "33",
+      "type": "llm_call",
+      "response_content": "Done"
+    },
+    {
+      "id": "34",
+      "type": "llm_call",
+      "response_content": "Done"
+    },
+    {
+      "id": "35",
+      "type": "llm_call",
+      "response_content": "Done"
+    },
+    {
+      "id": "36",
+      "type": "llm_call",
+      "response_content": "Done"
+    },
+    {
+      "id": "37",
+      "type": "llm_call",
+      "response_content": "Done"
+    },
+    {
+      "id": "38",
+      "type": "llm_call",
+      "response_content": "Done"
+    },
+    {
+      "id": "39",
+      "type": "llm_call",
+      "response_content": "Done"
+    },
+    {
+      "id": "40",
+      "type": "llm_call",
+      "response_content": "Done"
+    },
+    {
+      "id": "41",
+      "type": "llm_call",
+      "response_content": "Done"
+    },
+    {
+      "id": "42",
+      "type": "llm_call",
+      "response_content": "Done"
+    },
+    {
+      "id": "43",
+      "type": "llm_call",
+      "response_content": "Done"
+    },
+    {
+      "id": "44",
+      "type": "llm_call",
+      "response_content": "Done"
+    },
+    {
+      "id": "45",
+      "type": "llm_call",
+      "response_content": "Done"
+    },
+    {
+      "id": "46",
+      "type": "llm_call",
+      "response_content": "Done"
+    },
+    {
+      "id": "47",
+      "type": "llm_call",
+      "response_content": "Done"
+    },
+    {
+      "id": "48",
+      "type": "llm_call",
+      "response_content": "Done"
+    },
+    {
+      "id": "49",
+      "type": "llm_call",
+      "response_content": "Done"
+    },
+    {
+      "id": "50",
+      "type": "llm_call",
+      "response_content": "Done"
+    },
+    {
+      "id": "51",
+      "type": "llm_call",
+      "response_content": "Done"
+    },
+    {
+      "id": "52",
+      "type": "llm_call",
+      "response_content": "Done"
+    },
+    {
+      "id": "53",
+      "type": "llm_call",
+      "response_content": "Done"
+    },
+    {
+      "id": "54",
+      "type": "llm_call",
+      "response_content": "Done"
+    },
+    {
+      "id": "55",
+      "type": "llm_call",
+      "response_content": "Done"
+    },
+    {
+      "id": "56",
+      "type": "llm_call",
+      "response_content": "Done"
+    },
+    {
+      "id": "57",
+      "type": "llm_call",
+      "response_content": "Done"
+    },
+    {
+      "id": "58",
+      "type": "llm_call",
+      "response_content": "Done"
+    },
+    {
+      "id": "59",
+      "type": "llm_call",
+      "response_content": "Done"
+    },
+    {
+      "id": "60",
+      "type": "llm_call",
+      "response_content": "Done"
+    },
+    {
+      "id": "61",
+      "type": "llm_call",
+      "response_content": "Done"
+    },
+    {
+      "id": "62",
+      "type": "llm_call",
+      "response_content": "Done"
+    },
+    {
+      "id": "63",
+      "type": "llm_call",
+      "response_content": "Done"
+    },
+    {
+      "id": "64",
+      "type": "llm_call",
+      "response_content": "Done"
+    },
+    {
+      "id": "65",
+      "type": "llm_call",
+      "response_content": "Done"
+    },
+    {
+      "id": "66",
+      "type": "llm_call",
+      "response_content": "Done"
+    },
+    {
+      "id": "67",
+      "type": "llm_call",
+      "response_content": "Done"
+    },
+    {
+      "id": "68",
+      "type": "llm_call",
+      "response_content": "Done"
+    },
+    {
+      "id": "69",
+      "type": "llm_call",
+      "response_content": "Done"
+    },
+    {
+      "id": "70",
+      "type": "llm_call",
+      "response_content": "Done"
+    },
+    {
+      "id": "71",
+      "type": "llm_call",
+      "response_content": "Done"
+    },
+    {
+      "id": "72",
+      "type": "llm_call",
+      "response_content": "Done"
+    },
+    {
+      "id": "73",
+      "type": "llm_call",
+      "response_content": "Done"
+    },
+    {
+      "id": "74",
+      "type": "llm_call",
+      "response_content": "Done"
+    },
+    {
+      "id": "75",
+      "type": "llm_call",
+      "response_content": "Done"
+    },
+    {
+      "id": "76",
+      "type": "llm_call",
+      "response_content": "Done"
+    },
+    {
+      "id": "77",
+      "type": "llm_call",
+      "response_content": "Done"
+    },
+    {
+      "id": "78",
+      "type": "llm_call",
+      "response_content": "Done"
+    },
+    {
+      "id": "79",
+      "type": "llm_call",
+      "response_content": "Done"
+    },
+    {
+      "id": "80",
+      "type": "llm_call",
+      "response_content": "Done"
+    },
+    {
+      "id": "81",
+      "type": "llm_call",
+      "response_content": "Done"
+    },
+    {
+      "id": "82",
+      "type": "llm_call",
+      "response_content": "Done"
+    },
+    {
+      "id": "83",
+      "type": "llm_call",
+      "response_content": "Done"
+    },
+    {
+      "id": "84",
+      "type": "llm_call",
+      "response_content": "Done"
+    },
+    {
+      "id": "85",
+      "type": "llm_call",
+      "response_content": "Done"
+    },
+    {
+      "id": "86",
+      "type": "llm_call",
+      "response_content": "Done"
+    },
+    {
+      "id": "87",
+      "type": "llm_call",
+      "response_content": "Done"
+    },
+    {
+      "id": "88",
+      "type": "llm_call",
+      "response_content": "Done"
+    },
+    {
+      "id": "89",
+      "type": "llm_call",
+      "response_content": "Done"
+    },
+    {
+      "id": "90",
+      "type": "llm_call",
+      "response_content": "Done"
+    },
+    {
+      "id": "91",
+      "type": "llm_call",
+      "response_content": "Done"
+    },
+    {
+      "id": "92",
+      "type": "llm_call",
+      "response_content": "Done"
+    },
+    {
+      "id": "93",
+      "type": "llm_call",
+      "response_content": "Done"
+    },
+    {
+      "id": "94",
+      "type": "llm_call",
+      "response_content": "Done"
+    },
+    {
+      "id": "95",
+      "type": "llm_call",
+      "response_content": "Done"
+    },
+    {
+      "id": "96",
+      "type": "llm_call",
+      "response_content": "Done"
+    },
+    {
+      "id": "97",
+      "type": "llm_call",
+      "response_content": "Done"
+    },
+    {
+      "id": "98",
+      "type": "llm_call",
+      "response_content": "Done"
+    },
+    {
+      "id": "99",
+      "type": "llm_call",
+      "response_content": "Done"
+    },
+    {
+      "id": "100",
+      "type": "llm_call",
+      "response_content": "Done"
+    },
+    {
+      "id": "101",
+      "type": "llm_call",
+      "response_content": "Done"
+    },
+    {
+      "id": "102",
+      "type": "llm_call",
+      "response_content": "Done"
+    },
+    {
+      "id": "103",
+      "type": "llm_call",
+      "response_content": "Done"
+    },
+    {
+      "id": "104",
+      "type": "llm_call",
+      "response_content": "Done"
+    },
+    {
+      "id": "105",
+      "type": "llm_call",
+      "response_content": "Done"
+    },
+    {
+      "id": "106",
+      "type": "llm_call",
+      "response_content": "Done"
+    },
+    {
+      "id": "107",
+      "type": "llm_call",
+      "response_content": "Done"
+    },
+    {
+      "id": "108",
+      "type": "llm_call",
+      "response_content": "Done"
+    },
+    {
+      "id": "109",
+      "type": "llm_call",
+      "response_content": "Done"
+    },
+    {
+      "id": "110",
+      "type": "llm_call",
+      "response_content": "Done"
+    },
+    {
+      "id": "111",
+      "type": "llm_call",
+      "response_content": "Done"
+    },
+    {
+      "id": "112",
+      "type": "llm_call",
+      "response_content": "Done"
+    },
+    {
+      "id": "113",
+      "type": "llm_call",
+      "response_content": "Done"
+    },
+    {
+      "id": "114",
+      "type": "llm_call",
+      "response_content": "Done"
+    },
+    {
+      "id": "115",
+      "type": "llm_call",
+      "response_content": "Done"
+    },
+    {
+      "id": "116",
+      "type": "llm_call",
+      "response_content": "Done"
+    },
+    {
+      "id": "117",
+      "type": "llm_call",
+      "response_content": "Done"
+    },
+    {
+      "id": "118",
+      "type": "llm_call",
+      "response_content": "Done"
+    },
+    {
+      "id": "119",
+      "type": "llm_call",
+      "response_content": "Done"
+    },
+    {
+      "id": "120",
+      "type": "llm_call",
+      "response_content": "Done"
+    },
+    {
+      "id": "121",
+      "type": "llm_call",
+      "response_content": "Done"
+    },
+    {
+      "id": "122",
+      "type": "llm_call",
+      "response_content": "Done"
+    },
+    {
+      "id": "123",
+      "type": "llm_call",
+      "response_content": "Done"
+    },
+    {
+      "id": "124",
+      "type": "llm_call",
+      "response_content": "Done"
+    },
+    {
+      "id": "125",
+      "type": "llm_call",
+      "response_content": "Done"
+    },
+    {
+      "id": "126",
+      "type": "llm_call",
+      "response_content": "Done"
+    },
+    {
+      "id": "127",
+      "type": "llm_call",
+      "response_content": "Done"
+    },
+    {
+      "id": "128",
+      "type": "llm_call",
+      "response_content": "Done"
+    },
+    {
+      "id": "129",
+      "type": "llm_call",
+      "response_content": "Done"
+    },
+    {
+      "id": "130",
+      "type": "llm_call",
+      "response_content": "Done"
+    },
+    {
+      "id": "131",
+      "type": "llm_call",
+      "response_content": "Done"
+    },
+    {
+      "id": "132",
+      "type": "llm_call",
+      "response_content": "Done"
+    },
+    {
+      "id": "133",
+      "type": "llm_call",
+      "response_content": "Done"
+    },
+    {
+      "id": "134",
+      "type": "llm_call",
+      "response_content": "Done"
+    },
+    {
+      "id": "135",
+      "type": "llm_call",
+      "response_content": "Done"
+    },
+    {
+      "id": "136",
+      "type": "llm_call",
+      "response_content": "Done"
+    },
+    {
+      "id": "137",
+      "type": "llm_call",
+      "response_content": "Done"
+    },
+    {
+      "id": "138",
+      "type": "llm_call",
+      "response_content": "Done"
+    },
+    {
+      "id": "139",
+      "type": "llm_call",
+      "response_content": "Done"
+    },
+    {
+      "id": "140",
+      "type": "llm_call",
+      "response_content": "Done"
+    },
+    {
+      "id": "141",
+      "type": "llm_call",
+      "response_content": "Done"
+    },
+    {
+      "id": "142",
+      "type": "llm_call",
+      "response_content": "Done"
+    },
+    {
+      "id": "143",
+      "type": "llm_call",
+      "response_content": "Done"
+    },
+    {
+      "id": "144",
+      "type": "llm_call",
+      "response_content": "Done"
+    },
+    {
+      "id": "145",
+      "type": "llm_call",
+      "response_content": "Done"
+    },
+    {
+      "id": "146",
+      "type": "llm_call",
+      "response_content": "Done"
+    },
+    {
+      "id": "147",
+      "type": "llm_call",
+      "response_content": "Done"
+    },
+    {
+      "id": "148",
+      "type": "llm_call",
+      "response_content": "Done"
+    },
+    {
+      "id": "149",
+      "type": "llm_call",
+      "response_content": "Done"
+    },
+    {
+      "id": "150",
+      "type": "llm_call",
+      "response_content": "Done"
+    },
+    {
+      "id": "151",
+      "type": "llm_call",
+      "response_content": "Done"
+    },
+    {
+      "id": "152",
+      "type": "llm_call",
+      "response_content": "Done"
+    },
+    {
+      "id": "153",
+      "type": "llm_call",
+      "response_content": "Done"
+    },
+    {
+      "id": "154",
+      "type": "llm_call",
+      "response_content": "Done"
+    },
+    {
+      "id": "155",
+      "type": "llm_call",
+      "response_content": "Done"
+    },
+    {
+      "id": "156",
+      "type": "llm_call",
+      "response_content": "Done"
+    },
+    {
+      "id": "157",
+      "type": "llm_call",
+      "response_content": "Done"
+    },
+    {
+      "id": "158",
+      "type": "llm_call",
+      "response_content": "Done"
+    },
+    {
+      "id": "159",
+      "type": "llm_call",
+      "response_content": "Done"
+    },
+    {
+      "id": "160",
+      "type": "llm_call",
+      "response_content": "Done"
+    },
+    {
+      "id": "161",
+      "type": "llm_call",
+      "response_content": "Done"
+    },
+    {
+      "id": "162",
+      "type": "llm_call",
+      "response_content": "Done"
+    },
+    {
+      "id": "163",
+      "type": "llm_call",
+      "response_content": "Done"
+    },
+    {
+      "id": "164",
+      "type": "llm_call",
+      "response_content": "Done"
+    },
+    {
+      "id": "165",
+      "type": "llm_call",
+      "response_content": "Done"
+    },
+    {
+      "id": "166",
+      "type": "llm_call",
+      "response_content": "Done"
+    },
+    {
+      "id": "167",
+      "type": "llm_call",
+      "response_content": "Done"
+    },
+    {
+      "id": "168",
+      "type": "llm_call",
+      "response_content": "Done"
+    },
+    {
+      "id": "169",
+      "type": "llm_call",
+      "response_content": "Done"
+    },
+    {
+      "id": "170",
+      "type": "llm_call",
+      "response_content": "Done"
+    },
+    {
+      "id": "171",
+      "type": "llm_call",
+      "response_content": "Done"
+    },
+    {
+      "id": "172",
+      "type": "llm_call",
+      "response_content": "Done"
+    },
+    {
+      "id": "173",
+      "type": "llm_call",
+      "response_content": "Done"
+    },
+    {
+      "id": "174",
+      "type": "llm_call",
+      "response_content": "Done"
+    },
+    {
+      "id": "175",
+      "type": "llm_call",
+      "response_content": "Done"
+    },
+    {
+      "id": "176",
+      "type": "llm_call",
+      "response_content": "Done"
+    },
+    {
+      "id": "177",
+      "type": "llm_call",
+      "response_content": "Done"
+    },
+    {
+      "id": "178",
+      "type": "llm_call",
+      "response_content": "Done"
+    },
+    {
+      "id": "179",
+      "type": "llm_call",
+      "response_content": "Done"
+    },
+    {
+      "id": "180",
+      "type": "llm_call",
+      "response_content": "Done"
+    },
+    {
+      "id": "181",
+      "type": "llm_call",
+      "response_content": "Done"
+    },
+    {
+      "id": "182",
+      "type": "llm_call",
+      "response_content": "Done"
+    },
+    {
+      "id": "183",
+      "type": "llm_call",
+      "response_content": "Done"
+    },
+    {
+      "id": "184",
+      "type": "llm_call",
+      "response_content": "Done"
+    },
+    {
+      "id": "185",
+      "type": "llm_call",
+      "response_content": "Done"
+    },
+    {
+      "id": "186",
+      "type": "llm_call",
+      "response_content": "Done"
+    },
+    {
+      "id": "187",
+      "type": "llm_call",
+      "response_content": "Done"
+    },
+    {
+      "id": "188",
+      "type": "llm_call",
+      "response_content": "Done"
+    },
+    {
+      "id": "189",
+      "type": "llm_call",
+      "response_content": "Done"
+    },
+    {
+      "id": "190",
+      "type": "llm_call",
+      "response_content": "Done"
+    },
+    {
+      "id": "191",
+      "type": "llm_call",
+      "response_content": "Done"
+    },
+    {
+      "id": "192",
+      "type": "llm_call",
+      "response_content": "Done"
+    },
+    {
+      "id": "193",
+      "type": "llm_call",
+      "response_content": "Done"
+    },
+    {
+      "id": "194",
+      "type": "llm_call",
+      "response_content": "Done"
+    },
+    {
+      "id": "195",
+      "type": "llm_call",
+      "response_content": "Done"
+    },
+    {
+      "id": "196",
+      "type": "llm_call",
+      "response_content": "Done"
+    },
+    {
+      "id": "197",
+      "type": "llm_call",
+      "response_content": "Done"
+    },
+    {
+      "id": "198",
+      "type": "llm_call",
+      "response_content": "Done"
+    },
+    {
+      "id": "199",
+      "type": "llm_call",
+      "response_content": "Done"
+    },
+    {
+      "id": "200",
+      "type": "llm_call",
+      "response_content": "Done"
+    }
+  ],
+  "evaluation_kind": "synthetic",
+  "expected_diagnosis": {
+    "root_cause_category": "unknown",
+    "failed_at_step": 0
+  }
+}

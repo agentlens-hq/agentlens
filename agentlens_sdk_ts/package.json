@@ -4,29 +4,34 @@
   "description": "AgentLens Node.js SDK — local trace capture for AI agent debugging",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
+  "files": ["dist", "README.md"],
   "exports": {
     ".": {
+      "types": "./dist/index.d.ts",
       "require": "./dist/index.js",
-      "import": "./dist/index.mjs",
-      "types": "./dist/index.d.ts"
+      "import": "./dist/index.js"
     }
   },
   "scripts": {
     "build": "tsc",
-    "dev": "tsc --watch"
+    "dev": "tsc --watch",
+    "test": "npm run build && tsc --noEmit --module NodeNext --moduleResolution NodeNext --skipLibCheck tests/types.ts && node --test --test-timeout=30000 tests/*.cjs"
   },
   "keywords": ["agentlens", "ai", "agents", "tracing", "observability", "debugging"],
   "license": "MIT",
   "peerDependencies": {
-    "@anthropic-ai/sdk": ">=0.20.0",
-    "openai": ">=4.0.0"
+    "@anthropic-ai/sdk": ">=0.125 <0.126",
+    "openai": ">=6.49 <6.50"
   },
   "peerDependenciesMeta": {
     "@anthropic-ai/sdk": { "optional": true },
     "openai": { "optional": true }
   },
   "devDependencies": {
-    "typescript": "^5.0.0"
+    "typescript": "^5.0.0",
+    "@types/node": "^22.0.0",
+    "openai": "~6.49.0",
+    "@anthropic-ai/sdk": "~0.125.0"
   },
   "engines": {
     "node": ">=18.0.0"
