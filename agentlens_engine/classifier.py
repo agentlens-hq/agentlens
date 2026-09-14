@@ -113,18 +113,37 @@ def classify_from_evidence(compact_run: dict[str, Any]) -> dict[str, Any]:
     return result
 
 
+def _recovered_call(step: dict[str, Any], steps: list[dict[str, Any]]) -> bool:
+    return any(
+        later['step'] > step['step'] and later.get('type') == 'tool_call'
+        and later.get('tool_name') == step.get('tool_name')
+        and later.get('input_digest') == step.get('input_digest')
+        and later.get('completed') and not tool_error(later.get('output'))
+        for later in steps
+    )
+
+
 def _tool_selection(run):
     tools = {t['name']: t for t in run.get('tool_definitions', []) if isinstance(t, dict) and t.get('name')}
     for step in run['diagnostic_steps']:
         if step.get('type') != 'tool_call' or not tool_error(step.get('output')):
             continue
-        output = _text(step['output'])
+        if _recovered_call(step, run['diagnostic_steps']):
+            continue
+        output = step['output']
+        error = _text(output.get('error', '')) if isinstance(output, dict) else str(output)
         for other in tools:
             if other == step.get('tool_name'):
                 continue
-            pattern = r'(?i)(?:use\s+|available\s+(?:in|through)\s+|call\s+)' + re.escape(other) + r'\b'
-            if re.search(pattern, output):
-                result = _candidate('tool_selection', step, f"Step {step['step']} called '{step.get('tool_name')}', whose error explicitly directs this operation to '{other}'.")
+            # A request to call a helper (e.g. refresh a session) is not evidence
+            # that the original operation belongs to that helper.
+            name = re.escape(other) + r'\b'
+            exclusive = re.search(r'(?i)\bonly available\s+(?:in|through)\s+' + name, error)
+            wrong_tool = re.search(r'(?i)(?:^|[.!?]\s*)wrong tool\b', error)
+            redirect = re.search(r'(?i)\b(?:use|call)\s+' + name, error)
+            expected = output.get('expected_tool') if isinstance(output, dict) else None
+            if exclusive or wrong_tool and redirect or expected == other:
+                result = _candidate('tool_selection', step, f"Step {step['step']} called '{step.get('tool_name')}', but the tool error explicitly identifies '{other}' as the required tool; no successful retry of the original call is recorded.")
                 result['suggested_tool'] = other
                 yield result
                 break
@@ -181,18 +200,50 @@ def _state_drift(run):
             return
 
 
+def _field_problem(output: Any, field: str, values: dict[str, Any]) -> bool:
+    """Recognize explicit field diagnostics, not vocabulary in business data."""
+    messages = [output.get(k) for k in ('error', 'warning')] if isinstance(output, dict) else [output]
+    names = [r'[_ -]+'.join(re.escape(part) for part in re.split(r'[_ -]+', field))]
+    # Bare "id" is usable only when it identifies a single field in that object.
+    if field.endswith('_id') and sum(k == 'id' or k.endswith('_id') for k in values) == 1:
+        names.append('id')
+    name = '(?:' + '|'.join(names) + ')'
+    bad = r'(?:invalid|malformed|stale|corrupt(?:ed)?|empty|missing|null|required)'
+    pattern = (
+        rf'(?:{bad}\s+){{1,2}}(?:value\s+for\s+)?{name}\b'
+        rf'|{name}\s+(?:(?:is|was)\s+)?{bad}\b'
+        rf'|{name}\s+must\s+(?:not\s+be\s+(?:null|empty)|be\s+(?:valid|present|provided))\b'
+    )
+    return any(
+        re.match(pattern, clause.strip(), re.IGNORECASE)
+        for message in messages if isinstance(message, str)
+        for clause in re.split(r'[:;.!\n]', message)
+    )
+
+
 def _cascade(run):
     steps = run['diagnostic_steps']
     for source in steps:
         output = source.get('output')
-        if source.get('type') != 'tool_call' or not isinstance(output, dict) or tool_error(output) or not re.search(r'(?i)stale|invalid|corrupt|malformed', _text(output)):
+        if source.get('type') != 'tool_call' or not isinstance(output, dict) or not source.get('completed'):
             continue
         for target in steps:
-            if target['step'] <= source['step'] or not tool_error(target.get('output')) or not isinstance(target.get('input'), dict):
+            if target['step'] <= source['step'] or target.get('type') != 'tool_call' or not tool_error(target.get('output')) or not isinstance(target.get('input'), dict) or _recovered_call(target, steps):
                 continue
-            shared = [key for key, val in output.items() if key not in ('status', 'warning', 'error') and key in target['input'] and target['input'][key] == val]
+            shared = []
+            for key, val in output.items():
+                if key in ('status', 'warning', 'error') or key not in target['input'] or target['input'][key] != val:
+                    continue
+                fingerprint = source.get('output_field_digests', {}).get(key)
+                if not fingerprint or fingerprint != target.get('input_field_digests', {}).get(key):
+                    continue
+                empty = val is None or val == '' or isinstance(val, (list, dict)) and not val
+                if (empty or _field_problem(output, key, output)) and _field_problem(target['output'], key, target['input']):
+                    shared.append(key)
             if shared:
-                yield _candidate('cascade', source, f"Step {source['step']} returned flagged data in {shared}; step {target['step']} reused those exact field values in '{target.get('tool_name')}' and failed.", related=(target, 'input'))
+                result = _candidate('cascade', source, f"Step {source['step']} returned empty or explicitly flagged data in {shared}; step {target['step']} reused those exact values in '{target.get('tool_name')}' and its error identifies a problem with the same field.", related=(target, 'input'))
+                result['evidence'].append({'step': target['step'], 'field': 'output', 'quote': _text(target['output'])[:1000]})
+                yield result
                 return
 
 

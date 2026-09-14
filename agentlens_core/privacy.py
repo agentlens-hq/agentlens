@@ -14,6 +14,11 @@ from typing import Any
 REDACTED = '[REDACTED]'
 _MARKERS = {REDACTED, '[PII]', '[EMAIL]', '[TOKEN]', '[API_KEY]', '[SECRET]', '[PASSWORD]', '[PERSON]', '[PHONE]', '[CARD]', '[SSN]', '[ID]'}
 _SECRET_KEYS = {'apikey', 'accesskey', 'accesskeyid', 'secretaccesskey', 'accesstoken', 'refreshtoken', 'idtoken', 'authtoken', 'sessiontoken', 'bearertoken', 'clientsecret', 'privatekey', 'password', 'passwd', 'pwd', 'secret', 'token', 'bearer', 'authorization', 'proxyauthorization', 'cookie', 'setcookie', 'auth'}
+# Provider namespaces preserve the meaning of compound credential names. Avoid
+# generic "token" suffix matching, which would also catch non-secret metrics.
+_SECRET_SUFFIXES = {'password', 'secret'} | {
+    key for key in _SECRET_KEYS if key != 'token' and key.endswith(('key', 'keyid', 'token'))
+}
 _PII_KEYS = {'fullname', 'firstname', 'lastname', 'customername', 'patientname', 'personname', 'street', 'streetaddress', 'homeaddress', 'mailingaddress', 'dob', 'dateofbirth', 'ssn', 'socialsecurity', 'phonenumber', 'creditcard', 'cardnumber', 'accountnumber', 'routingnumber', 'passport', 'licensenumber', 'email'}
 _KEY_PATTERN = '|'.join('[_.-]*'.join(re.escape(char) for char in key) for key in sorted(_SECRET_KEYS | _PII_KEYS, key=len, reverse=True))
 _ASSIGN = re.compile(r'''(?i)\b((?:[a-z][a-z0-9_.-]*?)?(?:''' + _KEY_PATTERN + r'''))\s*["']?\s*[:=]\s*(?:"[^"\n]*"|'[^'\n]*'|[^\s,;}]+)''')
@@ -31,7 +36,7 @@ _PATTERNS = {
 
 def key_kind(key: str) -> str | None:
     normalized = re.sub('[^a-z0-9]', '', key.lower())
-    if normalized in _SECRET_KEYS or any(normalized.endswith(k) for k in ('apikey', 'password', 'secret', 'accesstoken', 'refreshtoken')):
+    if normalized in _SECRET_KEYS or any(normalized.endswith(k) for k in _SECRET_SUFFIXES):
         return 'credential'
     return 'pii' if normalized in _PII_KEYS else None
 

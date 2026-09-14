@@ -184,7 +184,8 @@ def _dispatch() -> None:
     if args.command == "evaluate":
         report = evaluate_cases()
         print_evaluation(report)
-        if report.get('fixture_cases', 0) != 6 or not report.get("scored_cases") or report.get("overall_accuracy", 0) < 1:
+        if (report.get('fixture_cases', 0) != 6 or not report.get("scored_cases")
+                or report.get("overall_accuracy", 0) < 1 or report.get("case_errors") or report.get("unscored_cases")):
             raise SystemExit(1)
         return
 
@@ -446,9 +447,15 @@ def _prepare_anonymized_upload(run_id: str | None, out_dir: Path) -> None:
         print(f"Skipped {len(runs) - len(written)} run(s) that still contained PII after anonymization.")
     print(f"Wrote upload manifest to {manifest_path}")
     print("Raw .agentlens/runs/*.json files were not copied.")
+    if len(written) != len(runs):
+        raise SystemExit(1)
 
 
 def _print_feedback_template(run_id: str) -> None:
+    item = _load_run_or_report(run_id)
+    if item is None:
+        return
+    run_id = item.get("run_id", run_id)
     print(f"# AgentLens Feedback: {run_id}")
     print()
     print("## What broke?")
@@ -647,7 +654,7 @@ def _load_diagnosis_for(item: dict[str, Any]) -> dict[str, Any] | None:
 
 
 def _print_prompt_viewer(run_id: str, step: int | None = None) -> None:
-    """Print the exact LLM prompt(s) sent during a run in readable form."""
+    """Print captured prompt data, not a reconstruction of the provider wire request."""
     item = _load_run_or_report(run_id)
     if item is None:
         return
@@ -672,34 +679,22 @@ def _print_prompt_viewer(run_id: str, step: int | None = None) -> None:
         print(f"\nStep {step_num}: {provider}/{model}")
         print("─" * 60)
 
+        for field in ("system", "instructions"):
+            if field in span:
+                print(f"[{field.upper()}]")
+                print(_prompt_content(span[field]))
+
         messages = span.get("input_messages") or []
         if messages:
             for msg in messages:
                 if not isinstance(msg, dict):
+                    print(_prompt_content(msg))
                     continue
-                role = (msg.get("role") or "unknown").upper()
-                content = msg.get("content")
-                if isinstance(content, str):
-                    body = content
-                elif isinstance(content, list):
-                    parts = []
-                    for block in content:
-                        if isinstance(block, dict):
-                            if block.get("type") == "text":
-                                parts.append(block.get("text", ""))
-                            elif block.get("type") == "tool_result":
-                                parts.append(f"[tool_result: {block.get('tool_use_id')}]")
-                            elif block.get("type") == "tool_use":
-                                parts.append(f"[tool_use: {block.get('name')}]")
-                            else:
-                                parts.append(json.dumps(block))
-                        else:
-                            parts.append(str(block))
-                    body = "\n".join(parts)
-                else:
-                    body = json.dumps(content, default=str)
+                role = str(msg.get("role") or msg.get("type") or "unknown").upper()
                 print(f"[{role}]")
-                print(body)
+                # Preserve call IDs, tool outputs and provider-specific message fields.
+                body = msg["content"] if set(msg) <= {"role", "content"} and "content" in msg else msg
+                print(_prompt_content(body))
                 print()
         else:
             print("(no messages captured)")
@@ -708,10 +703,7 @@ def _print_prompt_viewer(run_id: str, step: int | None = None) -> None:
         if tools:
             print(f"Tools available ({len(tools)}):")
             for t in tools:
-                if isinstance(t, dict):
-                    name = t.get("name") or (t.get("function") or {}).get("name") or "?"
-                    desc = t.get("description") or (t.get("function") or {}).get("description") or ""
-                    print(f"  • {name}" + (f" — {desc}" if desc else ""))
+                print(_prompt_content(t))
             print()
 
         resp = span.get("response_content")
@@ -737,11 +729,24 @@ def _print_prompt_viewer(run_id: str, step: int | None = None) -> None:
 
         usage = span.get("usage")
         cost = span.get("cost_usd") or 0
-        if isinstance(usage, dict) and (usage.get("input_tokens") or usage.get("prompt_tokens")):
-            inp = (usage.get("input_tokens") or 0) + (usage.get("prompt_tokens") or 0)
-            out = (usage.get("output_tokens") or 0) + (usage.get("completion_tokens") or 0)
+        if isinstance(usage, dict):
+            inp, out, _ = _usage_counts(usage)
             cost_str = f"  Cost: ${cost:.6f}" if cost > 0 else ""
             print(f"\n  Tokens: {inp} in / {out} out{cost_str}")
+
+
+def _prompt_content(value: Any) -> str:
+    return value if isinstance(value, str) else json.dumps(value, indent=2, default=str)
+
+
+def _usage_counts(usage: Any) -> tuple[int, int, int]:
+    """Provider aliases are alternatives, not additive counters; explicit zero is valid."""
+    if not isinstance(usage, dict):
+        return 0, 0, 0
+    inp = int(_number(usage.get("input_tokens", usage.get("prompt_tokens"))))
+    out = int(_number(usage.get("output_tokens", usage.get("completion_tokens"))))
+    total = inp + out if usage.get("total_tokens") is None else int(_number(usage["total_tokens"]))
+    return inp, out, total
 
 
 def _replay_run(run_id: str) -> None:
@@ -762,15 +767,16 @@ def _replay_run(run_id: str) -> None:
     print("Press ENTER to advance through each span. Ctrl+C to quit.")
 
     for i, span in enumerate(spans, start=1):
+        original_step = span.get("original_index", i)
         try:
-            input(f"\n[Press ENTER for step {i}/{len(spans)}]")
+            input(f"\n[Press ENTER for step {original_step} (span {i}/{len(spans)})]")
         except (KeyboardInterrupt, EOFError):
             print("\nReplay stopped.")
             return
 
         stype = span.get("type", "unknown")
         print(f"\n{'━' * 60}")
-        print(f"Step {i}/{len(spans)}  ·  {stype.upper()}")
+        print(f"Step {original_step} (span {i}/{len(spans)})  ·  {stype.upper()}")
         print('━' * 60)
 
         if stype == "llm_call":
@@ -789,7 +795,7 @@ def _replay_run(run_id: str) -> None:
                 for msg in messages[-3:]:  # Show last 3 to keep it concise
                     if not isinstance(msg, dict):
                         continue
-                    role = (msg.get("role") or "?").upper()
+                    role = str(msg.get("role") or "?").upper()
                     content = msg.get("content", "")
                     body = content if isinstance(content, str) else json.dumps(content, default=str)
                     print(f"  [{role}] {body[:200]}{'…' if len(body) > 200 else ''}")
@@ -812,8 +818,8 @@ def _replay_run(run_id: str) -> None:
                             if block.get("type") == "tool_use":
                                 print(f"  ↳ Called tool: {block.get('name')}({json.dumps(block.get('input', {}), default=str)[:100]})")
                             elif block.get("type") == "text":
-                                text = (block.get("text") or "")[:150]
-                                print(f"  ↳ Response text: {text}{'…' if len(block.get('text',''))>150 else ''}")
+                                text = _prompt_content(block.get("text"))
+                                print(f"  ↳ Response text: {text[:150]}{'…' if len(text)>150 else ''}")
 
         elif stype == "tool_call":
             print(f"Tool   : {span.get('tool_name', '?')}")
@@ -1001,7 +1007,7 @@ def _run_demo(open_browser: bool = True) -> None:
     print("=" * 60)
     print("Next steps:")
     print(f"  agentlens runs view {run_id[:8]}     # visual timeline")
-    print(f"  agentlens runs prompt {run_id[:8]}   # exact prompts sent")
+    print(f"  agentlens runs prompt {run_id[:8]}   # captured prompt data")
     print()
     print("Enable capture, then use @agentlens.run(name=...) to group and save:")
     print("  import agentlens")
@@ -1085,14 +1091,8 @@ def _summarize_run(item: dict[str, Any]) -> dict[str, Any]:
         if model:
             models[str(model)] = models.get(str(model), 0) + 1
 
-        usage = span.get("usage")
-        if not isinstance(usage, dict):
-            usage = {}
-        usage_input = _number(usage.get("input_tokens")) + _number(usage.get("prompt_tokens"))
-        usage_output = _number(usage.get("output_tokens")) + _number(usage.get("completion_tokens"))
-        usage_total = _number(usage.get("total_tokens"))
-        if usage_total == 0 and (usage_input or usage_output):
-            usage_total = usage_input + usage_output
+        usage = span.get("usage") if span.get("type") == "llm_call" else None
+        usage_input, usage_output, usage_total = _usage_counts(usage)
         input_tokens += int(usage_input)
         output_tokens += int(usage_output)
         total_tokens += int(usage_total)
@@ -1101,7 +1101,7 @@ def _summarize_run(item: dict[str, Any]) -> dict[str, Any]:
         latency_ms += span_latency
         if span_latency > 0 and span_latency > slowest_latency:
             slowest_latency = span_latency
-            slowest_step = _describe_span(index, span, span_latency)
+            slowest_step = _describe_span(span.get("original_index", index), span, span_latency)
 
         cost_usd += _extract_cost_usd(span)
 
@@ -1399,6 +1399,8 @@ def _doctor_evaluation() -> tuple[str, str]:
         return "FAIL", "no fixture cases found"
     if report['fixture_cases'] != 6 or report.get('healthy_cases', 0) < 8:
         return "FAIL", "required positive/healthy corpus is incomplete"
+    if report.get("case_errors") or report.get("unscored_cases"):
+        return "FAIL", "evaluation contains errors or unscored cases; run agentlens evaluate for details"
     if report["fixture_accuracy"] < 1.0 or report.get('overall_accuracy', 0) < 1.0:
         return "FAIL", "positive or healthy regression expectations failed"
     return "PASS", ""

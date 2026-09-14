@@ -41,6 +41,12 @@ def preprocess_run(spans: list[dict[str, Any]], run_json: dict[str, Any] | None 
         step['tools'] = step.get('tools') or []
         for key in ('input', 'output'):
             step[key + '_digest'] = hashlib.sha256(json.dumps(span.get(key), sort_keys=True, default=str).encode()).hexdigest()
+            # Display truncation must not make different propagated values equal.
+            if isinstance(span.get(key), dict) and isinstance(step.get(key), dict):
+                step[key + '_field_digests'] = {
+                    field: hashlib.sha256(json.dumps(span[key][field], sort_keys=True, default=str).encode()).hexdigest()
+                    for field in step[key] if field in span[key]
+                }
         steps.append(step)
     tools = {}
     for span in normalized:
