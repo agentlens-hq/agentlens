@@ -1,0 +1,59 @@
+{
+  "run_id": "repeated_success",
+  "status": "success",
+  "spans": [
+    {
+      "id": "0",
+      "type": "tool_call",
+      "tool_use_id": "0",
+      "tool_name": "lookup",
+      "input": {
+        "id": 1
+      },
+      "output": {
+        "result": "ok"
+      }
+    },
+    {
+      "id": "1",
+      "type": "tool_call",
+      "tool_use_id": "1",
+      "tool_name": "lookup",
+      "input": {
+        "id": 1
+      },
+      "output": {
+        "result": "ok"
+      }
+    },
+    {
+      "id": "2",
+      "type": "tool_call",
+      "tool_use_id": "2",
+      "tool_name": "lookup",
+      "input": {
+        "id": 1
+      },
+      "output": {
+        "result": "ok"
+      }
+    },
+    {
+      "id": "3",
+      "type": "tool_call",
+      "tool_use_id": "3",
+      "tool_name": "lookup",
+      "input": {
+        "id": 1
+      },
+      "output": {
+        "result": "ok"
+      }
+    }
+  ],
+  "evaluation_kind": "synthetic",
+  "expected_diagnosis": {
+    "root_cause_category": "unknown",
+    "failed_at_step": 0
+  }
+}

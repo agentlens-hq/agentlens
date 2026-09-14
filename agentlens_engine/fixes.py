@@ -6,18 +6,21 @@ from typing import Any
 
 
 def generate_fix(category: str, compact_run: dict[str, Any], diagnosis: dict[str, Any]) -> str:
+    step = diagnosis.get("failed_at_step", 0)
+    if category == 'unknown':
+        return ''
     tool = diagnosis.get("failed_at_tool") or _first_failed_tool(compact_run) or "the selected tool"
-    expected = _expected_tool(compact_run)
+    expected = diagnosis.get('suggested_tool')
 
     if category == "tool_selection":
         if expected and expected != tool:
             return (
-                f"Rewrite the tool descriptions so '{tool}' is clearly for external lookup and "
-                f"'{expected}' is clearly for this request, then route this case to '{expected}'."
+                f"Route this operation to '{expected}' as the error requests; distinguish its supported "
+                f"operation from '{tool}' in the tool descriptions and add a routing regression test."
             )
         return (
             f"Rewrite ambiguous tool descriptions and add a routing check before calling '{tool}' "
-            "so local tasks cannot be sent to the wrong tool."
+            "using the operation requirements and the tool's actual supported inputs."
         )
 
     if category == "loop":
@@ -28,13 +31,13 @@ def generate_fix(category: str, compact_run: dict[str, Any], diagnosis: dict[str
 
     if category == "context_pollution":
         return (
-            "Remove the contradictory instruction from the prompt and keep one explicit priority "
+            f"At original step {step}, remove the conflicting instruction shown in the evidence; keep one explicit priority "
             "rule for the task goal before tool selection."
         )
 
     if category == "state_drift":
         return (
-            "Restate the original user goal before each major step and reject tool calls whose "
+            f"At original step {step}, restore the original user goal in the next prompt and reject tool calls whose "
             "input no longer matches that goal."
         )
 
@@ -46,7 +49,7 @@ def generate_fix(category: str, compact_run: dict[str, Any], diagnosis: dict[str
 
     if category == "overflow":
         return (
-            "Summarize durable task facts before the context window fills, then reload that summary "
+            f"Before original step {step}, retain the omitted user facts in a short task summary, then reload it "
             "before making the final tool or answer decision."
         )
 
@@ -64,12 +67,4 @@ def _first_failed_tool(compact_run: dict[str, Any]) -> str | None:
     for step in compact_run.get("diagnostic_steps", []):
         if step.get("type") == "tool_call" and step.get("tool_name"):
             return step["tool_name"]
-    return None
-
-
-def _expected_tool(compact_run: dict[str, Any]) -> str | None:
-    for step in compact_run.get("diagnostic_steps", []):
-        expected = step.get("expected_tool")
-        if expected:
-            return expected
     return None

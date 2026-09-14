@@ -7,7 +7,6 @@ import json
 from pathlib import Path
 from typing import Any
 
-
 FIXTURE_DIR = Path("tests") / "phase2_runs"
 LOCAL_RUNS_DIR = Path(".agentlens") / "runs"
 
@@ -170,6 +169,7 @@ def loop_run() -> dict[str, Any]:
         tool_span("query_db", {"query": "customer:alex"}, {"status": "error", "error": "temporary timeout"}),
         error_span("Repeated query_db with the same input and no exit condition.", {"tool_name": "query_db"}),
     ]
+    spans[3]['tool_use_id'] = 'toolu_query_db_retry'
     return base_run("phase2_loop", "loop_case", spans)
 
 

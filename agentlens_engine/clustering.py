@@ -17,6 +17,9 @@ import json
 import re
 from typing import Any
 
+from agentlens_core.trace import normalize_run
+
+from .diagnose import diagnose_run
 
 # ── Public API ────────────────────────────────────────────────────────────────
 
@@ -40,7 +43,7 @@ def cluster_failures(runs: list[dict[str, Any]]) -> list[dict[str, Any]]:
             "error_signals": list[str],
         }
     """
-    error_runs = [r for r in runs if isinstance(r, dict) and r.get("status") in ("error", "failure")]
+    error_runs = [r for r in runs if isinstance(r, dict) and diagnose_run(r)["root_cause_category"] != "unknown"]
     if not error_runs:
         return []
 
@@ -96,7 +99,6 @@ def print_clusters(clusters: list[dict[str, Any]], total_runs: int | None = None
         count = cluster["count"]
         category = cluster["category"] or "unknown"
         tool = cluster["failed_tool"] or "various tools"
-        key = cluster["cluster_key"]
         print(f"#{i}  {category}  ·  {tool}")
         print(f"    {count} run(s)  ({pct:.0f}% of failures)")
         signals = cluster.get("error_signals") or []
@@ -114,20 +116,14 @@ def print_clusters(clusters: list[dict[str, Any]], total_runs: int | None = None
 # ── Internal ─────────────────────────────────────────────────────────────────
 
 def _fingerprint_run(run: dict[str, Any]) -> dict[str, Any]:
-    spans = [s for s in (run.get("spans") or []) if isinstance(s, dict)]
+    spans = normalize_run(run)["spans"]
 
     # --- category ---
-    diag = run.get("_diagnosis") or {}
+    diag = diagnose_run(run)
     category = diag.get("root_cause_category") or ""
     fix = diag.get("fix") or ""
 
-    if not category:
-        category = _infer_category(spans, run)
-
-    # --- failed tool ---
     failed_tool = diag.get("failed_at_tool")
-    if not failed_tool:
-        failed_tool = _infer_failed_tool(spans)
 
     # --- error signals ---
     error_signals = _extract_signals(spans)
@@ -140,41 +136,6 @@ def _fingerprint_run(run: dict[str, Any]) -> dict[str, Any]:
         "fix": fix,
         "error_signals": error_signals,
     }
-
-
-def _infer_category(spans: list[dict[str, Any]], run: dict[str, Any]) -> str:
-    all_text = json.dumps(spans, default=str).lower()
-    # Loop: same tool+input repeated
-    if _tool_repeat_exists(spans):
-        return "loop"
-    # Overflow
-    if any(kw in all_text for kw in ["context window", "truncated", "pushed out"]):
-        return "overflow"
-    # Tool selection: ambiguous descriptions and wrong tool used
-    if _has_ambiguous_tools(spans):
-        return "tool_selection"
-    # Cascade: stale/corrupted data
-    if any(kw in all_text for kw in ["stale", "corrupted", "invalid id"]):
-        return "cascade"
-    # State drift
-    if any(kw in all_text for kw in ["unrelated", "lost original goal", "off-topic"]):
-        return "state_drift"
-    # Generic fallback
-    return "tool_selection"
-
-
-def _infer_failed_tool(spans: list[dict[str, Any]]) -> str | None:
-    for s in reversed(spans):
-        if s.get("type") == "error":
-            ctx = s.get("context") or {}
-            if isinstance(ctx, dict) and ctx.get("tool_name"):
-                return ctx["tool_name"]
-    for s in spans:
-        if s.get("type") == "tool_call":
-            out = s.get("output")
-            if isinstance(out, dict) and (out.get("status") == "error" or out.get("error")):
-                return s.get("tool_name")
-    return None
 
 
 def _extract_signals(spans: list[dict[str, Any]]) -> list[str]:
@@ -194,47 +155,6 @@ def _extract_signals(spans: list[dict[str, Any]]) -> list[str]:
                     if len(signals) >= 8:
                         return signals
     return signals
-
-
-def _tool_repeat_exists(spans: list[dict[str, Any]]) -> bool:
-    seen: set[str] = set()
-    for s in spans:
-        if s.get("type") != "tool_call":
-            continue
-        key = json.dumps({"tool": s.get("tool_name"), "input": s.get("input")}, sort_keys=True, default=str)
-        if key in seen:
-            return True
-        seen.add(key)
-    return False
-
-
-def _has_ambiguous_tools(spans: list[dict[str, Any]]) -> bool:
-    """True if any two tools across the run have descriptions with Jaccard similarity >= 0.6.
-    Uses the same threshold as the classifier so clustering matches diagnosis behaviour.
-    """
-    descriptions: list[str] = []
-    for s in spans:
-        if s.get("type") != "llm_call":
-            continue
-        for t in (s.get("tools") or []):
-            if not isinstance(t, dict):
-                continue
-            desc = (t.get("description") or (t.get("function") or {}).get("description") or "").strip().lower()
-            if desc and desc not in descriptions:
-                descriptions.append(desc)
-    for i in range(len(descriptions)):
-        for j in range(i + 1, len(descriptions)):
-            if _desc_similarity(descriptions[i], descriptions[j]) >= 0.6:
-                return True
-    return False
-
-
-def _desc_similarity(a: str, b: str) -> float:
-    words_a = set(a.split())
-    words_b = set(b.split())
-    if not words_a or not words_b:
-        return 0.0
-    return len(words_a & words_b) / len(words_a | words_b)
 
 
 def _to_str(value: Any) -> str:

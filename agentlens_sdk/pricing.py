@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import math
+import re
 from typing import Any
 
 # Prices per million tokens (USD).  (input $/M, output $/M)
@@ -31,30 +33,29 @@ _PRICE_TABLE: dict[str, tuple[float, float]] = {
 
 
 def _lookup_price(model: str | None) -> tuple[float, float] | None:
-    if not model:
+    if not isinstance(model, str) or not model:
         return None
     m = model.lower()
-    best = ""
-    for key in _PRICE_TABLE:
-        if m.startswith(key) and len(key) > len(best):
-            best = key
-    return _PRICE_TABLE.get(best)
+    m = re.sub(r'-(?:\d{4}-\d{2}-\d{2}|\d{8}|latest)$', '', m)
+    return _PRICE_TABLE.get(m)
 
 
-def compute_cost_usd(model: str | None, usage: Any) -> float:
-    """Estimate cost in USD for one LLM call. Returns 0.0 when model/usage is unknown."""
+def compute_cost_usd(model: str | None, usage: Any) -> float | None:
+    """Historical price-table estimate; None means pricing or usage is unknown."""
     if not isinstance(usage, dict) or not model:
-        return 0.0
+        return None
+    if not any(usage.get(key) is not None for key in ('input_tokens', 'prompt_tokens', 'output_tokens', 'completion_tokens')):
+        return None
     price = _lookup_price(model)
     if price is None:
-        return 0.0
+        return None
     in_price, out_price = price
-    input_tok = _n(usage.get("input_tokens")) + _n(usage.get("prompt_tokens"))
-    output_tok = _n(usage.get("output_tokens")) + _n(usage.get("completion_tokens"))
+    input_tok = _n(usage.get("input_tokens", usage.get("prompt_tokens")))
+    output_tok = _n(usage.get("output_tokens", usage.get("completion_tokens")))
     return round((input_tok * in_price + output_tok * out_price) / 1_000_000, 8)
 
 
 def _n(value: Any) -> float:
-    if isinstance(value, (int, float)) and not isinstance(value, bool):
+    if isinstance(value, (int, float)) and not isinstance(value, bool) and math.isfinite(value) and value >= 0:
         return float(value)
     return 0.0

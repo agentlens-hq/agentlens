@@ -1,0 +1,15 @@
+{
+  "run_id": "partial",
+  "status": "running",
+  "spans": [
+    {
+      "type": "llm_call",
+      "response_content": "Working"
+    }
+  ],
+  "evaluation_kind": "synthetic",
+  "expected_diagnosis": {
+    "root_cause_category": "unknown",
+    "failed_at_step": 0
+  }
+}

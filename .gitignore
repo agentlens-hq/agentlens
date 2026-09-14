@@ -10,6 +10,9 @@ agentlens_run.json
 agentlens_sdk_ts/node_modules/
 agentlens_sdk_ts/dist/
 dist/
+build/
+.mypy_cache/
+.ruff_cache/
 .DS_Store
 
 # Launch / outreach materials — keep private

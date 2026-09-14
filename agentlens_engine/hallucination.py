@@ -10,10 +10,10 @@ Flags three classes of hallucination:
 
 from __future__ import annotations
 
-import json
 import re
 from typing import Any
 
+from agentlens_core.trace import normalize_run, normalized_tools, text_content
 
 # ── Public API ────────────────────────────────────────────────────────────────
 
@@ -34,6 +34,7 @@ def detect_hallucinations(
             "severity": "high" | "medium" | "low",
         }
     """
+    spans = normalize_run({"spans": spans})["spans"]
     schema_map = _build_schema_map(tool_definitions or [])
     # Also try to extract schemas from llm_call span tool lists
     for span in spans:
@@ -48,6 +49,7 @@ def detect_hallucinations(
     for i, span in enumerate(spans, start=1):
         if not isinstance(span, dict):
             continue
+        i = span.get("original_index", i)
         stype = span.get("type")
 
         if stype == "tool_call":
@@ -91,7 +93,7 @@ def hallucination_summary(events: list[dict[str, Any]]) -> str:
 def _build_schema_map(tool_defs: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
     """Return {tool_name: schema_properties_dict}."""
     result: dict[str, dict[str, Any]] = {}
-    for tool in tool_defs:
+    for tool in normalized_tools(tool_defs):
         if not isinstance(tool, dict):
             continue
         name = tool.get("name") or (tool.get("function") or {}).get("name")
@@ -104,7 +106,7 @@ def _build_schema_map(tool_defs: list[dict[str, Any]]) -> dict[str, dict[str, An
             schema = tool["function"].get("parameters") or {}
         props = schema.get("properties") or {}
         required = schema.get("required") or []
-        result[str(name)] = {"properties": props, "required": required}
+        result[str(name)] = {"properties": props, "required": required, "additionalProperties": schema.get("additionalProperties", True), "patternProperties": schema.get("patternProperties", {}), "combinators": any(k in schema for k in ("allOf", "anyOf", "oneOf", "$ref"))}
     return result
 
 
@@ -117,8 +119,8 @@ def _check_invented_params(
     schema: dict[str, Any],
 ) -> list[dict[str, Any]]:
     props = set(schema.get("properties", {}).keys())
-    if not props:
-        return []  # schema has no declared properties — can't check
+    if schema.get("additionalProperties") is not False or schema.get("patternProperties") or schema.get("combinators"):
+        return []
     extra = [k for k in tool_input if k not in props]
     if not extra:
         return []
@@ -172,129 +174,35 @@ def _check_context_contradiction(
     resp_text: str,
     tool_outputs: list[dict[str, Any]],
 ) -> list[dict[str, Any]]:
-    events: list[dict[str, Any]] = []
-
-    for tool_item in tool_outputs:
-        out = tool_item["output"]
-        out_text = _to_text(out)
-        tool_name = tool_item.get("tool_name", "tool")
-        out_step = tool_item.get("step", "?")
-
-        # 3a. Numeric contradiction
-        out_nums = _extract_numbers(out_text)
-        resp_nums = _extract_numbers(resp_text)
-        if out_nums and resp_nums:
-            conflicting = [
-                (n, r)
-                for n in out_nums
-                for r in resp_nums
-                if n != r and abs(n - r) / max(abs(n), 1) < 0.5 and abs(n - r) >= 1
-                and _number_appears_in_context(str(int(n)), out_text)
-                and _number_appears_in_context(str(int(r)), resp_text)
-            ]
-            for orig, claimed in conflicting[:1]:  # report first only
-                events.append(
-                    {
-                        "type": "context_contradiction",
-                        "step": step,
-                        "tool_name": tool_name,
-                        "detail": (
-                            f"LLM response mentions {int(claimed)!r} but '{tool_name}' "
-                            f"(step {out_step}) returned {int(orig)!r}."
-                        ),
-                        "confidence": 0.72,
-                        "severity": "medium",
-                    }
-                )
-
-        # 3b. Not-found contradiction
-        not_found_in_tool = _contains(out_text, [
-            "not found", "no results", "does not exist", "couldn't find", "unavailable",
-            "404", "null", "none", "empty",
-        ])
-        claims_exists = _contains(resp_text, [
-            "found", "exists", "retrieved", "here is", "the result",
-            "successfully", "available", "shows that",
-        ])
-        if not_found_in_tool and claims_exists:
-            events.append(
-                {
-                    "type": "context_contradiction",
-                    "step": step,
-                    "tool_name": tool_name,
-                    "detail": (
-                        f"LLM response claims to have found results, but '{tool_name}' "
-                        f"(step {out_step}) returned a not-found / empty result."
-                    ),
-                    "confidence": 0.78,
-                    "severity": "high",
-                }
-            )
-
-        # 3c. Error-status contradiction
-        is_error_output = (
-            isinstance(out, dict)
-            and (out.get("status") == "error" or out.get("error"))
-        )
-        claims_success = _contains(resp_text, [
-            "successfully", "completed", "done", "finished", "retrieved", "found the",
-        ])
-        if is_error_output and claims_success:
-            events.append(
-                {
-                    "type": "context_contradiction",
-                    "step": step,
-                    "tool_name": tool_name,
-                    "detail": (
-                        f"LLM response claims success, but '{tool_name}' "
-                        f"(step {out_step}) returned an error: "
-                        f"{str(out.get('error', ''))[:80]}."
-                    ),
-                    "confidence": 0.85,
-                    "severity": "high",
-                }
-            )
-
+    # Compare explicit field/value assertions against only the most recent result.
+    # Free prose and unrelated numbers do not establish entity correspondence.
+    if not tool_outputs:
+        return []
+    item = tool_outputs[-1]
+    output = item["output"]
+    if not isinstance(output, dict):
+        return []
+    events = []
+    entities = {k: str(v) for k, v in output.items() if k in ("id", "customer_id", "record_id", "name") and isinstance(v, (str, int))}
+    entity_matches = any(re.search(r"(?<!\w)" + re.escape(v) + r"(?!\w)", resp_text) for v in entities.values())
+    for field, observed in output.items():
+        if not entity_matches or type(observed) not in (int, float) or field in entities:
+            continue
+        pattern = r"\b" + re.escape(field) + r"\s*(?:is|=|:)\s*(-?\d+(?:\.\d+)?)\b"
+        for match in re.finditer(pattern, resp_text, re.I):
+            if float(match.group(1)) != observed:
+                events.append({"type": "context_contradiction", "step": step,
+                    "tool_name": item["tool_name"], "severity": "medium", "confidence": .8,
+                    "detail": f"Step {step} asserts {match.group(0)!r} for the same entity, but tool step {item['step']} returned {field}={observed}.",
+                    "evidence": {"source_step": item["step"], "field": field, "observed": observed, "quote": match.group(0)}})
+    if entity_matches and output.get("status") == "not_found":
+        positive = re.search(r"\b(?:record|customer)\s+(?:(?!\bnot\b)\w+\s+){0,2}(?:was\s+)?found\b", resp_text, re.I)
+        if positive and not re.search(r"\bnot\s+found\b", positive.group(0), re.I):
+            events.append({"type": "context_contradiction", "step": step, "tool_name": item["tool_name"],
+                "severity": "medium", "confidence": .8, "detail": f"Step {step} claims {positive.group(0)!r} for the entity marked not_found at tool step {item['step']}.",
+                "evidence": {"source_step": item["step"], "field": "status", "observed": "not_found", "quote": positive.group(0)}})
     return events
 
 
-# ── Text utilities ────────────────────────────────────────────────────────────
-
 def _extract_text(content: Any) -> str:
-    if content is None:
-        return ""
-    if isinstance(content, str):
-        return content
-    if isinstance(content, list):
-        parts = []
-        for block in content:
-            if isinstance(block, dict):
-                t = block.get("text") or block.get("content") or ""
-                parts.append(str(t))
-        return " ".join(parts)
-    if isinstance(content, dict):
-        return str(content.get("text") or content.get("content") or "")
-    return str(content)
-
-
-def _to_text(value: Any) -> str:
-    if value is None:
-        return ""
-    if isinstance(value, str):
-        return value
-    return json.dumps(value, default=str)
-
-
-def _extract_numbers(text: str) -> list[float]:
-    """Extract all standalone numbers from text."""
-    return [float(m) for m in re.findall(r"\b\d+(?:\.\d+)?\b", text)]
-
-
-def _number_appears_in_context(num_str: str, text: str) -> bool:
-    """True if num_str appears as a standalone number in text."""
-    return bool(re.search(r"\b" + re.escape(num_str) + r"\b", text))
-
-
-def _contains(text: str, needles: list[str]) -> bool:
-    lowered = text.lower()
-    return any(n in lowered for n in needles)
+    return text_content(content)

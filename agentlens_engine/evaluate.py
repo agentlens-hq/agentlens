@@ -7,18 +7,9 @@ import time
 from pathlib import Path
 from typing import Any
 
+from agentlens_core.trace import read_run
+
 from .diagnose import diagnose_run
-
-_PACKAGE_ROOT = Path(__file__).resolve().parents[1]
-
-
-def _resolve_dir(relative: str) -> Path:
-    """Return CWD-relative path if it exists, otherwise fall back to package root."""
-    cwd_path = Path.cwd() / relative
-    if cwd_path.exists():
-        return cwd_path
-    return _PACKAGE_ROOT / relative
-
 
 FIXTURE_EXPECTED = {
     "phase2_tool_selection": ("tool_selection", 2),
@@ -26,7 +17,7 @@ FIXTURE_EXPECTED = {
     "phase2_loop": ("loop", 2),
     "phase2_state_drift": ("state_drift", 1),
     "phase2_cascade": ("cascade", 2),
-    "phase2_overflow": ("overflow", 4),
+    "phase2_overflow": ("overflow", 2),
 }
 
 
@@ -35,11 +26,12 @@ def evaluate_cases(
     real_world_dir: Path | None = None,
 ) -> dict[str, Any]:
     if fixture_dir is None:
-        fixture_dir = _resolve_dir("tests/phase2_runs")
+        fixture_dir = Path(__file__).parent / "corpus" / "positive"
     if real_world_dir is None:
-        real_world_dir = _resolve_dir("real_world_cases")
+        real_world_dir = Path.cwd() / "real_world_cases"
     results: list[dict[str, Any]] = []
     results.extend(_evaluate_directory(fixture_dir, FIXTURE_EXPECTED, source="fixture"))
+    results.extend(_evaluate_directory(Path(__file__).parent / "corpus" / "healthy", {}, source="healthy"))
     results.extend(_evaluate_directory(real_world_dir, {}, source="real_world"))
     return _summarize(results)
 
@@ -47,14 +39,24 @@ def evaluate_cases(
 def print_evaluation(report: dict[str, Any]) -> None:
     print("AgentLens Diagnosis Evaluation")
     print()
+    print("Offline rule evaluation; small regression corpus, not a population accuracy estimate.")
+    print(f"Positive / healthy cases: {report['positive_cases']} / {report['healthy_cases']}")
+    print(f"False positives / false negatives: {report['false_positives']} / {report['false_negatives']}")
+    print(f"Category / original-step matches: {report['category_matches']} / {report['step_matches']} of {report['scored_cases']}")
+    print(f"Abstentions: {report['abstentions']} / {report['total_cases']}")
     print(f"Fixture cases: {report['fixture_cases']}")
     print(f"Fixture accuracy: {report['fixture_accuracy']:.0%}")
     print(f"Real-world cases: {report['real_world_cases']}")
     print(f"Real-world scored cases: {report['real_world_scored_cases']}")
-    print(f"Real-world accuracy: {report['real_world_accuracy']:.0%}")
+    print(f"Real-world accuracy: {report['real_world_accuracy']:.0%}" if report['real_world_scored_cases'] else "Real-world accuracy: unmeasured (no scored cases)")
     print(f"Low-confidence rate: {report['low_confidence_rate']:.0%}")
     print(f"Average runtime: {report['average_latency_ms']:.2f} ms")
     print(f"Most failed category: {report['most_failed_category']}")
+    print(f"False-positive rate: {report['false_positives']}/{report['healthy_cases']}")
+    print(f"False-negative rate: {report['false_negatives']}/{report['positive_cases']}")
+    print("Provider/framework groups (regression labels, not live validation):")
+    for group, counts in sorted(report['provider_breakdown'].items()):
+        print(f"- {group}: {counts['correct']}/{counts['total']} matched")
     print()
     print("Fixture accuracy by category:")
     for category, accuracy in sorted(report["accuracy_by_category"].items()):
@@ -81,7 +83,7 @@ def _evaluate_directory(
     for path in sorted(directory.rglob("*.json")):
         if path.name in {"actual_diagnosis.json", "expected_diagnosis.json", "diagnosis.json"}:
             continue
-        run = _load_json(path)
+        run = read_run(path)
         if run is None:
             continue
         run_id = str(run.get("run_id") or path.stem)
@@ -102,6 +104,7 @@ def _evaluate_directory(
         results.append(
             {
                 "source": source,
+                "provider_group": '/'.join(sorted({str(s.get('provider')) for s in run['spans'] if s.get('provider')})) or 'unspecified',
                 "path": str(path),
                 "run_id": run_id,
                 "expected_category": expected_category,
@@ -128,6 +131,11 @@ def _summarize(results: list[dict[str, Any]]) -> dict[str, Any]:
     by_category: dict[str, list[bool]] = {}
     real_by_category: dict[str, list[bool]] = {}
     failed_categories: dict[str, int] = {}
+    provider_breakdown: dict[str, dict[str, int]] = {}
+    for result in scored:
+        group = provider_breakdown.setdefault(result['provider_group'], {'correct': 0, 'total': 0})
+        group['total'] += 1
+        group['correct'] += int(result['correct'])
     for result in fixture_scored:
         by_category.setdefault(result["expected_category"], []).append(result["correct"])
     for result in real_world_scored:
@@ -138,6 +146,15 @@ def _summarize(results: list[dict[str, Any]]) -> dict[str, Any]:
             failed_categories[category] = failed_categories.get(category, 0) + 1
 
     return {
+        "results": results,
+        "provider_breakdown": provider_breakdown,
+        "positive_cases": sum(r["expected_category"] not in (None, "unknown") for r in results),
+        "healthy_cases": sum(r["source"] == "healthy" for r in results),
+        "false_positives": sum(r["source"] == "healthy" and r["actual_category"] != "unknown" for r in results),
+        "false_negatives": sum(r["expected_category"] not in (None, "unknown") and r["actual_category"] == "unknown" for r in results),
+        "category_matches": sum(r["scored"] and r["expected_category"] == r["actual_category"] for r in results),
+        "step_matches": sum(r["scored"] and r["expected_step"] == r["actual_step"] for r in results),
+        "abstentions": sum(r["actual_category"] == "unknown" for r in results),
         "total_cases": len(results),
         "scored_cases": len(scored),
         "overall_accuracy": _rate([result["correct"] for result in scored]),
@@ -182,9 +199,12 @@ def _expected_for(
 
 def _load_json(path: Path) -> dict[str, Any] | None:
     try:
-        return json.loads(path.read_text(encoding="utf-8"))
-    except json.JSONDecodeError:
-        return None
+        value = json.loads(path.read_text(encoding="utf-8"))
+        if not isinstance(value, dict):
+            raise ValueError(f'Evaluation expectation must be an object: {path}')
+        return value
+    except (json.JSONDecodeError, UnicodeError, OSError) as exc:
+        raise ValueError(f"Cannot read evaluation expectation {path}: {exc}") from exc
 
 
 def _rate(values: list[bool]) -> float:

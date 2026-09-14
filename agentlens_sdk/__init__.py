@@ -15,6 +15,7 @@ from .collector import (
 from .langgraph import patch_langgraph
 
 __all__ = [
+    "AgentLensClient",
     # Public API — use these
     "init",
     "run",

@@ -8,7 +8,10 @@ No external dependencies, no server — open the file directly in a browser.
 from __future__ import annotations
 
 import json
+import re
 from typing import Any
+
+from agentlens_core.trace import normalize_run
 
 
 def generate_html(run: dict[str, Any], diagnosis: dict[str, Any] | None = None) -> str:
@@ -17,20 +20,18 @@ def generate_html(run: dict[str, Any], diagnosis: dict[str, Any] | None = None) 
     diagnosis is the optional output of diagnose_run() for this run; when
     present the viewer shows a root-cause banner and highlights the failed step.
     """
+    run = normalize_run(run)
     run_json = _embed(run)
     diag_json = _embed(diagnosis) if diagnosis else "null"
     title = _esc(str(run.get("name") or run.get("run_id") or "AgentLens Run"))
-    return (
-        _TEMPLATE
-        .replace("/*__RUN__*/null", run_json)
-        .replace("/*__DIAG__*/null", diag_json)
-        .replace("__TITLE__", title)
-    )
+    values = {"/*__RUN__*/null": run_json, "/*__DIAG__*/null": diag_json, "__TITLE__": title}
+    return re.sub(r"/\*__RUN__\*/null|/\*__DIAG__\*/null|__TITLE__", lambda match: values[match.group(0)], _TEMPLATE)
 
 
 def _embed(obj: Any) -> str:
     # Escape </script> so injected JSON cannot break out of the <script> block.
-    return json.dumps(obj, ensure_ascii=False, default=str).replace("</script>", r"<\/script>")
+    encoded = json.dumps(obj, ensure_ascii=True, default=str)
+    return encoded.replace('<', r'\u003c').replace('>', r'\u003e').replace('&', r'\u0026')
 
 
 def _esc(s: str) -> str:
@@ -245,7 +246,7 @@ function renderStrip(){
   const segs=spans.map((s,i)=>{
     const l=+s.latency_ms||0;
     const pct=latSum>0?Math.max((l/total)*100,0.6):100/spans.length;
-    return `<div class="lat-seg" data-i="${i}" style="width:${pct}%;background:${meta(s.type).color}" title="step ${i+1}: ${esc(spanTitle(s))} ${ms(l)}"></div>`;
+    return `<div class="lat-seg" data-i="${i}" style="width:${pct}%;background:${meta(s.type).color}" title="step ${s.original_index||i+1}: ${esc(spanTitle(s))} ${ms(l)}"></div>`;
   }).join('');
   const el=document.getElementById('latstrip');
   el.innerHTML=segs;
@@ -264,7 +265,7 @@ function hotRow(i,on){
 function renderList(){
   const h=spans.map((s,i)=>{
     const m=meta(s.type);
-    const step=i+1;
+    const step=s.original_index||i+1;
     const isFailed=failedStep===step;
     const l=+s.latency_ms||0;
     const pct=maxLat>0?Math.max(Math.round(l/maxLat*100),l>0?4:0):0;
@@ -358,7 +359,7 @@ function renderDetail(){
   const el=document.getElementById('detail');
   if(!s){el.innerHTML=renderDiagBanner()+'<div style="color:var(--text3);font-family:var(--mono)">No span selected.</div>';return}
   const m=meta(s.type);
-  const step=sel+1;
+  const step=s.original_index||sel+1;
   let h=renderDiagBanner();
 
   h+=`<div class="sh">

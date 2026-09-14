@@ -1,0 +1,33 @@
+{
+  "run_id": "polling",
+  "status": "success",
+  "spans": [
+    {
+      "type": "tool_call",
+      "tool_name": "poll",
+      "tool_use_id": "0",
+      "input": {
+        "job": "a"
+      },
+      "output": {
+        "status": "pending"
+      }
+    },
+    {
+      "type": "tool_call",
+      "tool_name": "poll",
+      "tool_use_id": "1",
+      "input": {
+        "job": "a"
+      },
+      "output": {
+        "status": "complete"
+      }
+    }
+  ],
+  "evaluation_kind": "synthetic",
+  "expected_diagnosis": {
+    "root_cause_category": "unknown",
+    "failed_at_step": 0
+  }
+}

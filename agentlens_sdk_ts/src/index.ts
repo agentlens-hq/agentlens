@@ -35,7 +35,7 @@ export interface Run {
   name: string;
   started_at: string;
   ended_at: string | null;
-  status: 'running' | 'success' | 'error';
+  status: 'running' | 'success' | 'error' | 'cancelled' | 'partial';
   parent_run_id?: string;
   spans: Span[];
   error?: string;
@@ -85,24 +85,21 @@ const PRICE_TABLE: Record<string, [number, number]> = {
 function computeCostUsd(
   model: string | undefined,
   usage: Record<string, number> | undefined,
-): number {
-  if (!model || !usage) return 0;
-  const m = model.toLowerCase();
-  let best = '';
-  for (const key of Object.keys(PRICE_TABLE)) {
-    if (m.startsWith(key) && key.length > best.length) best = key;
-  }
-  if (!best) return 0;
-  const [inPrice, outPrice] = PRICE_TABLE[best];
-  const inputTok  = (usage.input_tokens  ?? 0) + (usage.prompt_tokens     ?? 0);
-  const outputTok = (usage.output_tokens ?? 0) + (usage.completion_tokens ?? 0);
+): number | null {
+  if (!model || !usage || !['input_tokens', 'prompt_tokens', 'output_tokens', 'completion_tokens'].some(key => usage[key] != null)) return null;
+  const m = model.toLowerCase().replace(/-(?:\d{4}-\d{2}-\d{2}|\d{8}|latest)$/, '');
+  if (!Object.prototype.hasOwnProperty.call(PRICE_TABLE, m)) return null;
+  const [inPrice, outPrice] = PRICE_TABLE[m];
+  const count = (value: unknown): number => typeof value === 'number' && Number.isFinite(value) && value >= 0 ? value : 0;
+  const inputTok = count(usage.input_tokens ?? usage.prompt_tokens);
+  const outputTok = count(usage.output_tokens ?? usage.completion_tokens);
   return Math.round((inputTok * inPrice + outputTok * outPrice) / 1_000_000 * 1e8) / 1e8;
 }
 
 // ── Internal state ───────────────────────────────────────────────────────────
 
 const storage = new AsyncLocalStorage<Run>();
-let RUNS_DIR = path.join('.agentlens', 'runs');
+const RUNS_DIR = path.join('.agentlens', 'runs');
 
 const _cfg = {
   initialized: false,
@@ -121,40 +118,55 @@ function newUuid(): string {
   return crypto.randomUUID();
 }
 
-function toJsonable(value: unknown): unknown {
+function toJsonable(value: unknown, depth = 0): unknown {
+  if (depth > 30) return "[depth limit]";
   if (value === null || value === undefined) return value;
   if (typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean') return value;
-  if (Array.isArray(value)) return value.map(toJsonable);
+  if (Array.isArray(value)) return value.map(v => toJsonable(v, depth + 1));
   if (value instanceof Error) return { message: value.message, name: value.name };
   if (typeof value === 'object') {
     if (typeof (value as { toJSON?: () => unknown }).toJSON === 'function') {
-      return toJsonable((value as { toJSON: () => unknown }).toJSON());
+      return toJsonable((value as { toJSON: () => unknown }).toJSON(), depth + 1);
     }
     const out: Record<string, unknown> = {};
-    for (const [k, v] of Object.entries(value as object)) out[k] = toJsonable(v);
+    for (const [k, v] of Object.entries(value as object)) out[k] = toJsonable(v, depth + 1);
     return out;
   }
   return String(value);
 }
 
-function appendSpan(spanData: Omit<Span, 'id' | 'run_id'>): Span {
+function appendSpan(spanData: {type: Span['type']; ts: string; [key: string]: unknown}): Span {
   const r = storage.getStore();
   if (!r) {
     // No active run — orphan span (best-effort, not persisted)
     return { id: newUuid(), run_id: 'orphan', ...spanData } as Span;
   }
-  const span: Span = { id: newUuid(), run_id: r.run_id, ...spanData } as Span;
+  const id = newUuid();
+  const span: Span = { ...spanData, id, span_id: id, original_index: r.spans.length + 1, run_id: r.run_id } as Span;
   r.spans.push(span);
   return span;
 }
 
 function saveRun(runData: Run): void {
+  let temporary: string | undefined;
   try {
     fs.mkdirSync(RUNS_DIR, { recursive: true });
-    const filePath = path.join(RUNS_DIR, `${runData.run_id}.json`);
-    fs.writeFileSync(filePath, JSON.stringify(runData, null, 2), 'utf8');
-  } catch {
-    // Best-effort — never crash the user's agent
+    const filePath = path.join(RUNS_DIR, runData.run_id + '.json');
+    temporary = filePath + '.' + newUuid() + '.tmp';
+    const fd = fs.openSync(temporary, 'wx', 0o600);
+    try {
+      fs.writeFileSync(fd, JSON.stringify(runData, null, 2), 'utf8');
+      fs.fsyncSync(fd);
+    } finally { fs.closeSync(fd); }
+    fs.renameSync(temporary, filePath);
+  } catch (error) {
+    process.emitWarning('Trace persistence failed: ' + String(error));
+  } finally {
+    try {
+      if (temporary && fs.existsSync(temporary)) fs.unlinkSync(temporary);
+    } catch (error) {
+      process.emitWarning('Trace temporary-file cleanup failed: ' + String(error));
+    }
   }
 }
 
@@ -172,6 +184,7 @@ export function init(options: InitOptions = {}): void {
     patchAnthropic();
     patchOpenAI();
     _cfg.initialized = true;
+    if (!_cfg.patchedAnthropic && !_cfg.patchedOpenAI) process.emitWarning("No supported provider SDK installed.");
   }
 }
 
@@ -205,18 +218,21 @@ export async function run<T>(
   return storage.run(runData, async () => {
     try {
       const result = await fn();
-      runData.status = 'success';
+      if (runData.status === 'running') runData.status = 'success';
       return result;
     } catch (err) {
-      runData.status = 'error';
+      runData.status = err instanceof Error && err.name === 'AbortError' ? 'cancelled' : 'error';
       runData.error = String(err);
       appendSpan({ type: 'error', ts: nowIso(), error: String(err), context: { function: name } });
       throw err;
     } finally {
       runData.ended_at = nowIso();
       // Promote to error if any error spans exist
-      if (runData.status === 'success' && runData.spans.some(s => s.type === 'error')) {
+      if (runData.status === 'success' && runData.spans.some(s => s.type === 'error' || s.error)) {
         runData.status = 'error';
+      }
+      if (runData.status === 'success' && runData.spans.some(s => s.type === 'tool_call' && s.completed !== true)) {
+        runData.status = 'partial';
       }
       saveRun(runData);
     }
@@ -248,14 +264,15 @@ export function recordToolResult(options: {
   output?: unknown;
   toolUseId?: string;
 }): void {
-  appendSpan({
-    type: 'tool_call',
-    ts: nowIso(),
-    tool_name: options.toolName,
-    input: toJsonable(options.input) ?? null,
-    output: toJsonable(options.output) ?? null,
-    tool_use_id: options.toolUseId ?? null,
-  });
+  const r = storage.getStore();
+  const existing = options.toolUseId ? r?.spans.find(s => s.type === 'tool_call' && s.tool_use_id === options.toolUseId) : undefined;
+  const fields = {
+    type: 'tool_call' as const, ts: nowIso(), tool_name: options.toolName,
+    input: toJsonable(options.input) ?? null, output: toJsonable(options.output) ?? null,
+    tool_use_id: options.toolUseId ?? null, completed: true,
+  };
+  if (existing) Object.assign(existing, fields);
+  else appendSpan(fields);
 }
 
 /**
@@ -274,165 +291,84 @@ export function recordMemorySnapshot(label: string, state: Record<string, unknow
   });
 }
 
-// ── Anthropic patch ──────────────────────────────────────────────────────────
+// Resource methods are patched without replacing client constructors.
+type RecordValue = Record<string, any>;
 
-function patchAnthropic(): void {
-  if (_cfg.patchedAnthropic) return;
-  try {
-    // eslint-disable-next-line @typescript-eslint/no-require-imports
-    const sdk = require('@anthropic-ai/sdk') as { Anthropic: new (...args: unknown[]) => unknown };
-    const OriginalAnthropic = sdk.Anthropic;
-
-    // Wrap the constructor with a Proxy so every new Anthropic() instance gets patched.
-    sdk.Anthropic = new Proxy(OriginalAnthropic, {
-      construct(Target, args) {
-        const instance = new Target(...args) as {
-          messages: { create: (...a: unknown[]) => Promise<unknown>; stream: (...a: unknown[]) => unknown };
-        };
-
-        const origCreate = instance.messages.create.bind(instance.messages);
-        instance.messages.create = async (params: Record<string, unknown>) => {
-          const started = Date.now();
-          const msgs = params['messages'] ?? [];
-          try {
-            const response = await origCreate(params);
-            const resp = response as { content?: unknown; stop_reason?: string; usage?: Record<string, number> };
-            const content = toJsonable(resp.content);
-            const usage = resp.usage;
-            const model = params['model'] as string | undefined;
-            appendSpan({
-              type: 'llm_call',
-              provider: 'anthropic',
-              ts: nowIso(),
-              latency_ms: Date.now() - started,
-              input_messages: toJsonable(msgs),
-              tools: toJsonable(params['tools'] ?? []),
-              model,
-              response_content: content,
-              stop_reason: resp.stop_reason ?? null,
-              usage: toJsonable(usage),
-              cost_usd: computeCostUsd(model, usage),
-            });
-            return response;
-          } catch (err) {
-            appendSpan({
-              type: 'error',
-              ts: nowIso(),
-              latency_ms: Date.now() - started,
-              error: String(err),
-              context: { provider: 'anthropic', model: params['model'] },
-            });
-            throw err;
-          }
-        };
-
-        // Patch streaming too
-        if (typeof instance.messages.stream === 'function') {
-          const origStream = instance.messages.stream.bind(instance.messages);
-          instance.messages.stream = (params: Record<string, unknown>) => {
-            const started = Date.now();
-            const ctx = origStream(params) as {
-              __enter__?: () => unknown;
-              on?: (event: string, cb: (...a: unknown[]) => void) => unknown;
-              getFinalMessage?: () => Promise<unknown>;
-              [Symbol.asyncIterator]?: () => AsyncIterator<unknown>;
-            };
-            // Wrap with a finalizer that captures the span
-            const originalGetFinalMessage = ctx.getFinalMessage?.bind(ctx);
-            if (originalGetFinalMessage) {
-              ctx.getFinalMessage = async () => {
-                const message = await originalGetFinalMessage();
-                const msg = message as { content?: unknown; stop_reason?: string; usage?: Record<string, number> };
-                const content = toJsonable(msg.content);
-                const usage = msg.usage;
-                const model = params['model'] as string | undefined;
-                appendSpan({
-                  type: 'llm_call',
-                  provider: 'anthropic',
-                  ts: nowIso(),
-                  latency_ms: Date.now() - started,
-                  input_messages: toJsonable(params['messages'] ?? []),
-                  tools: toJsonable(params['tools'] ?? []),
-                  model,
-                  response_content: content,
-                  stop_reason: msg.stop_reason ?? null,
-                  usage: toJsonable(usage),
-                  cost_usd: computeCostUsd(model, usage),
-                  streaming: true,
-                });
-                return message;
-              };
-            }
-            return ctx;
-          };
-        }
-
-        return instance;
-      },
-    });
-
-    _cfg.patchedAnthropic = true;
-  } catch {
-    // @anthropic-ai/sdk not installed — skip silently
+function captureTools(response: RecordValue, provider: string): void {
+  const calls = provider === 'anthropic'
+    ? (response.content ?? []).filter((b: RecordValue) => b.type === 'tool_use')
+    : (response.choices ?? []).flatMap((c: RecordValue) => c.message?.tool_calls ?? []);
+  for (const call of calls) {
+    const id = call.id;
+    if (id && storage.getStore()?.spans.some(s => s.type === 'tool_call' && s.tool_use_id === id)) continue;
+    let input = call.input ?? call.function?.arguments;
+    if (typeof input === 'string') {
+      try { input = JSON.parse(input); } catch { /* Preserve invalid provider arguments as evidence. */ }
+    }
+    appendSpan({ type: 'tool_call', ts: nowIso(), tool_use_id: id,
+      tool_name: call.name ?? call.function?.name, input, output: null, completed: false });
   }
 }
 
-// ── OpenAI patch ─────────────────────────────────────────────────────────────
-
-function patchOpenAI(): void {
-  if (_cfg.patchedOpenAI) return;
-  try {
-    // eslint-disable-next-line @typescript-eslint/no-require-imports
-    const sdk = require('openai') as { OpenAI: new (...args: unknown[]) => unknown };
-    const OriginalOpenAI = sdk.OpenAI;
-
-    sdk.OpenAI = new Proxy(OriginalOpenAI, {
-      construct(Target, args) {
-        const instance = new Target(...args) as {
-          chat: { completions: { create: (...a: unknown[]) => Promise<unknown> } };
-        };
-
-        const origCreate = instance.chat.completions.create.bind(instance.chat.completions);
-        instance.chat.completions.create = async (params: Record<string, unknown>) => {
-          const started = Date.now();
-          try {
-            const response = await origCreate(params);
-            const rj = toJsonable(response) as Record<string, unknown> | null;
-            const usage = rj?.['usage'] as Record<string, number> | undefined;
-            const model = params['model'] as string | undefined;
-            const stopReason = (rj?.['choices'] as Array<Record<string, unknown>> | undefined)?.[0]?.['finish_reason'];
-            appendSpan({
-              type: 'llm_call',
-              provider: 'openai',
-              ts: nowIso(),
-              latency_ms: Date.now() - started,
-              input_messages: toJsonable(params['messages'] ?? []),
-              tools: toJsonable(params['tools'] ?? params['functions'] ?? []),
-              model,
-              response_content: rj,
-              stop_reason: stopReason ?? null,
-              usage: toJsonable(usage),
-              cost_usd: computeCostUsd(model, usage),
-            });
-            return response;
-          } catch (err) {
-            appendSpan({
-              type: 'error',
-              ts: nowIso(),
-              latency_ms: Date.now() - started,
-              error: String(err),
-              context: { provider: 'openai', model: params['model'] },
-            });
-            throw err;
-          }
-        };
-
-        return instance;
-      },
-    });
-
-    _cfg.patchedOpenAI = true;
-  } catch {
-    // openai not installed — skip silently
+function captureResults(messages: RecordValue[]): void {
+  for (const message of messages) {
+    const blocks = message.role === 'tool'
+      ? [{ tool_use_id: message.tool_call_id, content: message.content }]
+      : Array.isArray(message.content) ? message.content.filter((b: RecordValue) => b.type === 'tool_result') : [];
+    for (const block of blocks) {
+      const span = storage.getStore()?.spans.find(s => s.type === 'tool_call' && s.tool_use_id === block.tool_use_id);
+      if (!span) continue;
+      recordToolResult({toolName: String(span.tool_name), input: span.input,
+        output: block.content, toolUseId: block.tool_use_id});
+      if (block.is_error) span.error = block.content;
+    }
   }
+}
+
+function patchResource(moduleName: string, className: string, provider: string): boolean {
+  let resource: any;
+  try { resource = require(moduleName)[className]; }
+  catch { return false; }
+  const original = resource.prototype.create;
+  if (original.__agentlens) return true;
+  function create(this: unknown, params: RecordValue, ...options: unknown[]) {
+    const active = storage.getStore();
+    const started = Date.now();
+    if (!active) return original.call(this, params, ...options);
+    captureResults(params.messages ?? []);
+    const request = toJsonable(params) as RecordValue;
+    const finish = (response: RecordValue | null, error?: unknown) => storage.run(active, () => {
+      appendSpan({type: 'llm_call', provider, ts: nowIso(), model: request.model,
+        input_messages: request.messages ?? [], tools: request.tools ?? [], system: request.system,
+        latency_ms: Date.now() - started, response_content: toJsonable(provider === 'anthropic' ? response?.content : response),
+        usage: toJsonable(response?.usage), stop_reason: response?.stop_reason ?? response?.choices?.[0]?.finish_reason,
+        status: error ? 'error' : 'completed', error: error ? String(error) : null,
+        cost_usd: computeCostUsd(request.model, response?.usage)});
+      if (response) captureTools(response, provider);
+      if (error) appendSpan({type: 'error', ts: nowIso(), error: String(error), context: {provider, model: request.model}});
+    });
+    let promise: any;
+    try { promise = original.call(this, params, ...options); }
+    catch (error) { finish(null, error); throw error; }
+    // Keep the SDK's original APIPromise, including withResponse/asResponse.
+    promise.then((response: RecordValue) => {
+      if (params.stream) {
+        active.status = 'partial';
+        process.emitWarning('Node streaming capture is not supported; use Python or non-streaming create.');
+        return;
+      }
+      try { finish(response); } catch { process.emitWarning('Trace capture failed; provider result is unchanged.'); }
+    }, (error: unknown) => { try { finish(null, error); } catch { process.emitWarning('Error trace capture failed.'); } });
+    return promise;
+  }
+  (create as any).__agentlens = true;
+  resource.prototype.create = create;
+  return true;
+}
+
+function patchAnthropic(): void {
+  _cfg.patchedAnthropic = patchResource('@anthropic-ai/sdk/resources/messages', 'Messages', 'anthropic');
+}
+function patchOpenAI(): void {
+  _cfg.patchedOpenAI = patchResource('openai/resources/chat/completions', 'Completions', 'openai');
 }

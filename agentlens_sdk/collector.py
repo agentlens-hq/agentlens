@@ -7,20 +7,28 @@ import contextvars
 import functools
 import inspect
 import json
+import threading
 import time
 import uuid
+import warnings
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any, Callable, TypeVar, cast
+
+from agentlens_core.storage import atomic_write, safe_path
+from agentlens_core.trace import read_run, tool_error
 
 from .pricing import compute_cost_usd
 
+F = TypeVar('F', bound=Callable[..., Any])
 
 RUNS_DIR = Path(".agentlens") / "runs"
 _current_run: contextvars.ContextVar[dict[str, Any] | None] = contextvars.ContextVar(
     "agentlens_current_run", default=None
 )
 _config: dict[str, Any] = {"api_key": None, "patched": set(), "originals": {}}
+_patch_lock = threading.RLock()
+_parent_context: contextvars.ContextVar[str | None] = contextvars.ContextVar('agentlens_parent', default=None)
 
 
 class AmbiguousRunIdError(ValueError):
@@ -30,6 +38,12 @@ class AmbiguousRunIdError(ValueError):
         super().__init__(f"Multiple runs match '{prefix}'")
         self.prefix = prefix
         self.matches = matches
+
+
+class InvalidRunFilesError(ValueError):
+    def __init__(self, errors: list[str], runs: list[dict[str, Any]]):
+        super().__init__('; '.join(errors))
+        self.runs = runs
 
 
 class AgentLensClient:
@@ -87,57 +101,68 @@ def init(
     stitch sub-agent runs into the parent trace.
     """
     _config["api_key"] = api_key
-    if parent_context and parent_context.get("parent_run_id"):
-        _config["parent_run_id"] = parent_context["parent_run_id"]
-    _patch_anthropic()
-    _patch_anthropic_async()
-    _patch_openai()
-    _patch_openai_async()
+    _parent_context.set(parent_context.get("parent_run_id") if parent_context else None)
+    with _patch_lock:
+        _patch_providers()
 
 
-def run(name: str) -> Callable[[Callable[..., Any]], Callable[..., Any]]:
+def run(name: str) -> Callable[[F], F]:
     """Group all captured spans inside the decorated function into one saved run."""
 
-    def decorator(func: Callable[..., Any]) -> Callable[..., Any]:
+    def decorator(func: F) -> F:
         if inspect.iscoroutinefunction(func):
 
             @functools.wraps(func)
             async def async_wrapper(*args: Any, **kwargs: Any) -> Any:
-                run_data = start_run(name=name, parent_run_id=_config.get("parent_run_id"))
+                parent = _current_run.get()
+                run_data = start_run(name=name, parent_run_id=parent['run_id'] if parent else _parent_context.get())
                 token = _current_run.set(run_data)
                 try:
                     result = await func(*args, **kwargs)
                     run_data["status"] = "success"
                     return result
-                except Exception as exc:
+                except BaseException as exc:
+                    if isinstance(exc, (asyncio.CancelledError, KeyboardInterrupt, SystemExit)):
+                        run_data['status'] = 'cancelled'
+                        capture_error(exc, context={'function': func.__name__, 'cancelled': True})
+                        raise
                     run_data["status"] = "error"
                     run_data["error"] = str(exc)
                     capture_error(exc, context={"function": func.__name__})
                     raise
                 finally:
-                    _finalize_run(run_data)
-                    _current_run.reset(token)
+                    try:
+                        _finalize_run(run_data)
+                    finally:
+                        _current_run.reset(token)
 
-            return async_wrapper
+            return cast(F, async_wrapper)
 
         @functools.wraps(func)
         def sync_wrapper(*args: Any, **kwargs: Any) -> Any:
-            run_data = start_run(name=name, parent_run_id=_config.get("parent_run_id"))
+            parent = _current_run.get()
+            run_data = start_run(name=name, parent_run_id=parent['run_id'] if parent else _parent_context.get())
             token = _current_run.set(run_data)
             try:
                 result = func(*args, **kwargs)
                 run_data["status"] = "success"
                 return result
-            except Exception as exc:
+            except BaseException as exc:
+                if isinstance(exc, (asyncio.CancelledError, KeyboardInterrupt, SystemExit)):
+                    run_data['status'] = 'cancelled'
+                    capture_error(exc, context={'function': func.__name__, 'cancelled': True})
+                    raise
                 run_data["status"] = "error"
                 run_data["error"] = str(exc)
                 capture_error(exc, context={"function": func.__name__})
                 raise
             finally:
-                _finalize_run(run_data)
-                _current_run.reset(token)
+                try:
+                    _finalize_run(run_data)
+                finally:
+                    _current_run.reset(token)
 
-        return sync_wrapper
+        return cast(F, sync_wrapper)
 
     return decorator
 
@@ -199,15 +224,17 @@ def current_run() -> dict[str, Any]:
 def append_span(span: dict[str, Any]) -> dict[str, Any]:
     run_data = current_run()
     enriched = {
+        **span,
         "id": str(uuid.uuid4()),
         "run_id": run_data["run_id"],
-        **span,
+        'original_index': len(run_data['spans']) + 1,
     }
+    enriched['span_id'] = enriched['id']
     run_data["spans"].append(enriched)
     return enriched
 
 
-def _find_open_tool_span(tool_use_id: str | None) -> dict[str, Any] | None:
+def _find_tool_span(tool_use_id: str | None) -> dict[str, Any] | None:
     """Return the request span the monkeypatch already recorded for this tool call.
 
     The provider monkeypatches record a tool_call span with output=None when the
@@ -223,7 +250,6 @@ def _find_open_tool_span(tool_use_id: str | None) -> dict[str, Any] | None:
         if (
             span.get("type") == "tool_call"
             and span.get("tool_use_id") == tool_use_id
-            and span.get("output") is None
         ):
             return span
     return None
@@ -233,10 +259,11 @@ def record_tool_result(
     tool_name: str, output: Any, input: Any | None = None, tool_use_id: str | None = None
 ) -> None:
     output_json = _to_jsonable(output)
-    existing = _find_open_tool_span(tool_use_id)
+    existing = _find_tool_span(tool_use_id)
     if existing is not None:
         # Fill the result onto the request span the monkeypatch already recorded.
         existing["output"] = output_json
+        existing['completed'] = True
         if input is not None and existing.get("input") in (None, {}):
             existing["input"] = _to_jsonable(input)
         if not existing.get("tool_name"):
@@ -249,10 +276,11 @@ def record_tool_result(
                 "tool_name": tool_name,
                 "input": _to_jsonable(input),
                 "output": output_json,
+                'completed': True,
                 "tool_use_id": tool_use_id,
             }
         )
-    if _is_error_output(output_json):
+    if _is_error_output(output_json) and not any(s.get('type') == 'error' and s.get('context', {}).get('tool_use_id') == tool_use_id for s in current_run()['spans'] if isinstance(s.get('context', {}), dict)):
         capture_error(
             error=_extract_error_message(output_json),
             context={
@@ -266,25 +294,27 @@ def record_tool_result(
 
 def save_run(path: str | None = None, run: dict[str, Any] | None = None) -> Path:
     run_data = run if run is not None else current_run()
-    if run_data.get("ended_at") is None:
-        run_data["ended_at"] = _now_iso()
-    if run_data.get("status") == "running":
-        run_data["status"] = "success"
-
-    output_path = Path(path) if path else RUNS_DIR / f"{run_data['run_id']}.json"
-    output_path.parent.mkdir(parents=True, exist_ok=True)
-    output_path.write_text(json.dumps(run_data, indent=2), encoding="utf-8")
+    output_path = Path(path) if path else safe_path(RUNS_DIR, run_data['run_id'])
+    atomic_write(output_path, run_data)
     return output_path
 
 
 def _finalize_run(run_data: dict[str, Any]) -> None:
     if run_data["status"] == "success" and _run_has_error_span(run_data):
         run_data["status"] = "error"
+    if run_data['status'] == 'success' and any(s.get('status') == 'partial' or (s.get('type') == 'tool_call' and not s.get('completed', s.get('output') is not None)) for s in run_data['spans']):
+        run_data['status'] = 'partial'
     run_data["ended_at"] = _now_iso()
-    save_run(run=run_data)
+    try:
+        save_run(run=run_data)
+    except Exception as exc:
+        try:
+            warnings.warn(f'Run {run_data["run_id"]} could not be persisted ({type(exc).__name__}); agent result is unchanged.', RuntimeWarning)
+        except Warning:
+            pass  # A warnings-as-errors policy must not replace the agent's result.
 
 
-def capture_error(error: Exception | str, context: Any, latency_ms: float | None = None) -> None:
+def capture_error(error: BaseException | str, context: Any, latency_ms: float | None = None) -> None:
     append_span(
         {
             "type": "error",
@@ -300,6 +330,13 @@ def capture_error(error: Exception | str, context: Any, latency_ms: float | None
 def capture_tool_results_from_messages(messages: Any, provider: str) -> None:
     run_data = current_run()
     for message in _as_list(messages):
+        if _get_value(message, 'role') == 'tool' or _get_value(message, 'type') == 'function_call_output':
+            call_id = _get_value(message, 'tool_call_id') or _get_value(message, 'call_id')
+            existing = _find_tool_span(call_id)
+            if existing is not None and not _tool_result_already_recorded(call_id, run_data):
+                output = _get_value(message, 'output') if _get_value(message, 'type') == 'function_call_output' else _get_value(message, 'content')
+                record_tool_result(existing['tool_name'], output, tool_use_id=call_id)
+            continue
         for block in _as_list(_get_value(message, "content")):
             if _get_value(block, "type") != "tool_result":
                 continue
@@ -322,6 +359,12 @@ def capture_tool_results_from_messages(messages: Any, provider: str) -> None:
                 output=_get_value(block, "content"),
                 tool_use_id=tool_use_id,
             )
+            if _get_value(block, 'is_error'):
+                existing = _find_tool_span(tool_use_id)
+                if existing is not None:
+                    existing['is_error'] = True
+                    existing['status'] = 'error'
+                capture_error(str(_get_value(block, 'content')), context={'tool_name': tool_name, 'tool_use_id': tool_use_id})
 
 
 def _tool_result_already_recorded(tool_use_id: str | None, run_data: dict[str, Any]) -> bool:
@@ -332,7 +375,7 @@ def _tool_result_already_recorded(tool_use_id: str | None, run_data: dict[str, A
         if (
             span.get("type") == "tool_call"
             and span.get("tool_use_id") == tool_use_id
-            and span.get("output") is not None
+            and span.get('completed', span.get('output') is not None)
         ):
             return True
     return False
@@ -357,6 +400,8 @@ def capture_anthropic_tool_calls(response_content: Any) -> None:
     for block in _as_list(response_content):
         if _get_value(block, "type") != "tool_use":
             continue
+        if _find_tool_span(_get_value(block, 'id')) is not None:
+            continue
         append_span(
             {
                 "type": "tool_call",
@@ -373,6 +418,8 @@ def capture_openai_tool_calls(response: Any) -> None:
     response_json = _to_jsonable(response)
 
     for tool_call in _find_tool_calls(response_json):
+        if _find_tool_span(tool_call.get('id')) is not None:
+            continue
         function = tool_call.get("function", {}) if isinstance(tool_call, dict) else {}
         append_span(
             {
@@ -386,667 +433,222 @@ def capture_openai_tool_calls(response: Any) -> None:
         )
 
 
-def _patch_anthropic() -> None:
+def _patch_providers() -> None:
+    import importlib
+    patched = []
+    resources = [
+        ('anthropic.resources.messages', 'Messages', 'anthropic', 'messages', False),
+        ('anthropic.resources.messages', 'AsyncMessages', 'anthropic', 'messages', True),
+        ('openai.resources.chat.completions', 'Completions', 'openai', 'chat', False),
+        ('openai.resources.chat.completions', 'AsyncCompletions', 'openai', 'chat', True),
+        ('openai.resources.responses', 'Responses', 'openai', 'responses', False),
+        ('openai.resources.responses', 'AsyncResponses', 'openai', 'responses', True),
+    ]
+    for module, name, provider, api, asynchronous in resources:
+        try:
+            resource = getattr(importlib.import_module(module), name)
+        except (ImportError, AttributeError):
+            continue
+        _instrument_resource(resource, provider, api, asynchronous)
+        patched.append(provider + ':' + api)
+    # Small local example clients may have no resource modules.
+    for provider, class_name in [('anthropic', 'Anthropic'), ('openai', 'OpenAI')]:
+        try:
+            provider_module = importlib.import_module(provider)
+            cls = getattr(provider_module, class_name)
+        except (ImportError, AttributeError):
+            continue
+        if not any(p.startswith(provider + ':') for p in patched):
+            original = cls.__init__
+            if not getattr(original, '_agentlens_wrapped', False):
+                def initialize(self, *args, _original=original, _provider=provider, **kwargs):
+                    _original(self, *args, **kwargs)
+                    resource = self.messages if _provider == 'anthropic' else self.chat.completions
+                    _instrument_resource(type(resource), _provider, 'messages' if _provider == 'anthropic' else 'chat', False)
+                setattr(initialize, '_agentlens_wrapped', True)
+                cls.__init__ = initialize
+            patched.append(provider)
+    _config['patched'].update(patched)
+    if not patched:
+        warnings.warn('No supported provider SDK is installed; capture is inactive. Install runlens[openai] or runlens[anthropic].', RuntimeWarning)
+
+
+def _instrument_resource(resource: Any, provider: str, api: str, asynchronous: bool) -> None:
+    original = resource.create
+    if getattr(original, '_agentlens_wrapped', False):
+        return
+    if asynchronous:
+        @functools.wraps(original)
+        async def create(self, *args, **kwargs):
+            return await _capture_async(lambda: original(self, *args, **kwargs), kwargs, provider, api)
+    else:
+        @functools.wraps(original)
+        def create(self, *args, **kwargs):
+            return _capture_sync(lambda: original(self, *args, **kwargs), kwargs, provider, api)
+    setattr(create, '_agentlens_wrapped', True)
+    resource.create = create
+    if provider == 'anthropic' and hasattr(resource, 'stream'):
+        stream = resource.stream
+        @functools.wraps(stream)
+        def managed(self, *args, **kwargs):
+            return _MessageContext(lambda: stream(self, *args, **kwargs), kwargs, asynchronous)
+        resource.stream = managed
+
+
+def _call_context(kwargs: dict[str, Any], provider: str) -> dict[str, Any]:
+    result = {'provider': provider, 'model': kwargs.get('model'),
+              'input_messages': _to_jsonable(kwargs.get('messages', kwargs.get('input', []))),
+              'tools': _to_jsonable(kwargs.get('tools', []))}
+    for field in ('system', 'instructions', 'previous_response_id', 'conversation'):
+        if field in kwargs:
+            result[field] = _to_jsonable(kwargs[field])
+    return result
+
+
+def _begin_call(kwargs: dict[str, Any], provider: str):
+    capture_tool_results_from_messages(kwargs.get('messages', kwargs.get('input', [])), provider)
+    run_data = current_run()
+    context = _call_context(kwargs, provider)
+    started, ts = time.perf_counter(), _now_iso()
+
+    def finish(response: Any, status: str = 'completed', error: BaseException | None = None):
+        token = _current_run.set(run_data)
+        try:
+            data = _to_jsonable(response)
+            if not isinstance(data, dict):
+                data = {}
+            usage = data.get('usage') or {}
+            span = append_span({
+                **context, 'type': 'llm_call', 'ts': ts, 'ended_at': _now_iso(),
+                'latency_ms': _elapsed_ms(started), 'status': status,
+                'response_content': data.get('content') if provider == 'anthropic' else data,
+                'stop_reason': data.get('stop_reason') or data.get('status') or _first_choice_stop_reason(data),
+                'usage': usage, 'cost_usd': compute_cost_usd(kwargs.get('model'), usage),
+                'streaming': bool(kwargs.get('stream')), 'error': str(error) if error else None,
+            })
+            before = len(run_data['spans'])
+            if provider == 'anthropic':
+                capture_anthropic_tool_calls(data.get('content', []))
+            else:
+                capture_openai_tool_calls(data)
+            for tool_span in run_data['spans'][before:]:
+                tool_span['parent_span_id'] = span['span_id']
+            if error:
+                capture_error(error, context=context, latency_ms=_elapsed_ms(started))
+        except Exception as exc:
+            warnings.warn(f'Trace capture failed ({type(exc).__name__}); provider result is unchanged.', RuntimeWarning)
+        finally:
+            _current_run.reset(token)
+    return finish
+
+
+def _capture_sync(call: Callable, kwargs: dict[str, Any], provider: str, api: str):
+    from .streams import Stream
+    finish = _begin_call(kwargs, provider)
     try:
-        import anthropic
-    except ImportError:
-        return
-
-    if not hasattr(anthropic, "Anthropic"):
-        return
-
-    if "anthropic" in _config["patched"]:
-        return
-
-    original_anthropic = anthropic.Anthropic
-    _config["originals"]["anthropic.Anthropic"] = original_anthropic
-
-    class AgentLensAnthropic:
-        def __init__(self, *args: Any, **kwargs: Any):
-            self._agentlens_client = original_anthropic(*args, **kwargs)
-            self.messages = _AnthropicMessagesProxy(self._agentlens_client.messages)
-
-        def __getattr__(self, name: str) -> Any:
-            return getattr(self._agentlens_client, name)
-
-    anthropic.Anthropic = AgentLensAnthropic
-    _config["patched"].add("anthropic")
+        response = call()
+    except BaseException as exc:
+        finish({}, 'cancelled' if isinstance(exc, (asyncio.CancelledError, KeyboardInterrupt)) else 'error', exc)
+        raise
+    if kwargs.get('stream'):
+        return Stream(response, provider, api, _to_jsonable, finish)
+    finish(response)
+    return response
 
 
-def _patch_anthropic_async() -> None:
-    """Patch anthropic.AsyncAnthropic so async agents are captured."""
+async def _capture_async(call: Callable, kwargs: dict[str, Any], provider: str, api: str):
+    from .streams import AsyncStream
+    finish = _begin_call(kwargs, provider)
     try:
-        import anthropic
-    except ImportError:
-        return
+        response = await call()
+    except BaseException as exc:
+        finish({}, 'cancelled' if isinstance(exc, asyncio.CancelledError) else 'error', exc)
+        raise
+    if kwargs.get('stream'):
+        return AsyncStream(response, provider, api, _to_jsonable, finish)
+    finish(response)
+    return response
 
-    if not hasattr(anthropic, "AsyncAnthropic"):
-        return
 
-    if "anthropic_async" in _config["patched"]:
-        return
+class _MessageContext:
+    def __init__(self, factory, kwargs, asynchronous):
+        self.manager: Any
+        self.stream: Any
+        self.factory, self.asynchronous = factory, asynchronous
+        self.finish = _begin_call({**kwargs, 'stream': True}, 'anthropic')
+        self.manager = None
+        self.stream = None
 
-    original_async = anthropic.AsyncAnthropic
-    _config["originals"]["anthropic.AsyncAnthropic"] = original_async
+    def __enter__(self):
+        try:
+            self.manager = self.factory()
+            self.stream = self.manager.__enter__()
+            return self.stream
+        except BaseException as exc:
+            self.finish({}, 'error', exc)
+            raise
 
-    class AgentLensAsyncAnthropic:
-        def __init__(self, *args: Any, **kwargs: Any):
-            self._agentlens_client = original_async(*args, **kwargs)
-            self.messages = _AsyncAnthropicMessagesProxy(self._agentlens_client.messages)
+    async def __aenter__(self):
+        try:
+            self.manager = self.factory()
+            self.stream = await self.manager.__aenter__()
+            return self.stream
+        except BaseException as exc:
+            self.finish({}, 'cancelled' if isinstance(exc, asyncio.CancelledError) else 'error', exc)
+            raise
 
-        def __getattr__(self, name: str) -> Any:
-            return getattr(self._agentlens_client, name)
+    def _finish(self, exc):
+        try:
+            snapshot = self.stream.current_message_snapshot
+        except (RuntimeError, AttributeError):
+            snapshot = {}
+        status = 'completed' if _get_value(snapshot, 'stop_reason') else 'partial'
+        if exc:
+            status = 'cancelled' if isinstance(exc, asyncio.CancelledError) else 'error'
+        self.finish(snapshot, status, exc)
 
-    anthropic.AsyncAnthropic = AgentLensAsyncAnthropic
-    _config["patched"].add("anthropic_async")
+    def __exit__(self, kind, exc, tb):
+        self._finish(exc)
+        return self.manager.__exit__(kind, exc, tb)
+
+    async def __aexit__(self, kind, exc, tb):
+        self._finish(exc)
+        return await self.manager.__aexit__(kind, exc, tb)
 
 
 class _AnthropicMessagesProxy:
-    def __init__(self, messages: Any):
-        self._messages = messages
-
-    def create(self, **kwargs: Any) -> Any:
-        started = time.perf_counter()
-        capture_tool_results_from_messages(kwargs.get("messages", []), provider="anthropic")
-        try:
-            response = self._messages.create(**kwargs)
-            response_content = _to_jsonable(getattr(response, "content", None))
-            usage = _to_jsonable(getattr(response, "usage", None))
-            model = kwargs.get("model")
-            append_span(
-                {
-                    "type": "llm_call",
-                    "provider": "anthropic",
-                    "ts": _now_iso(),
-                    "latency_ms": _elapsed_ms(started),
-                    "input_messages": _to_jsonable(kwargs.get("messages", [])),
-                    "tools": _to_jsonable(kwargs.get("tools", [])),
-                    "model": model,
-                    "response_content": response_content,
-                    "stop_reason": getattr(response, "stop_reason", None),
-                    "usage": usage,
-                    "cost_usd": compute_cost_usd(model, usage if isinstance(usage, dict) else {}),
-                }
-            )
-            capture_anthropic_tool_calls(response_content)
-            return response
-        except Exception as exc:
-            capture_error(exc, context=_anthropic_context(kwargs), latency_ms=_elapsed_ms(started))
-            raise
-
-    def stream(self, **kwargs: Any) -> "_AnthropicStreamContext":
-        """Wrap Anthropic streaming so the span is captured when the stream closes."""
-        started = time.perf_counter()
-        capture_tool_results_from_messages(kwargs.get("messages", []), provider="anthropic")
-        try:
-            ctx = self._messages.stream(**kwargs)
-        except Exception as exc:
-            capture_error(exc, context=_anthropic_context(kwargs), latency_ms=_elapsed_ms(started))
-            raise
-        return _AnthropicStreamContext(ctx, kwargs, started)
-
-    def __getattr__(self, name: str) -> Any:
-        return getattr(self._messages, name)
-
-
-class _AnthropicStreamContext:
-    """Context manager wrapper that saves a span when Anthropic streaming completes."""
-
-    def __init__(self, ctx: Any, kwargs: dict[str, Any], started: float) -> None:
-        self._ctx = ctx
-        self._kwargs = kwargs
-        self._started = started
-        self._stream: Any = None
-
-    def __enter__(self) -> Any:
-        self._stream = self._ctx.__enter__()
-        return self._stream
-
-    def __exit__(self, *args: Any) -> Any:
-        result = self._ctx.__exit__(*args)
-        self._save_span()
-        return result
-
-    def _save_span(self) -> None:
-        if self._stream is None:
-            return
-        try:
-            message = getattr(self._stream, "get_final_message", lambda: None)()
-            if message is None:
-                return
-            response_content = _to_jsonable(getattr(message, "content", None))
-            usage = _to_jsonable(getattr(message, "usage", None))
-            model = self._kwargs.get("model")
-            append_span(
-                {
-                    "type": "llm_call",
-                    "provider": "anthropic",
-                    "ts": _now_iso(),
-                    "latency_ms": _elapsed_ms(self._started),
-                    "input_messages": _to_jsonable(self._kwargs.get("messages", [])),
-                    "tools": _to_jsonable(self._kwargs.get("tools", [])),
-                    "model": model,
-                    "response_content": response_content,
-                    "stop_reason": getattr(message, "stop_reason", None),
-                    "usage": usage,
-                    "cost_usd": compute_cost_usd(model, usage if isinstance(usage, dict) else {}),
-                    "streaming": True,
-                }
-            )
-            capture_anthropic_tool_calls(response_content)
-        except Exception:
-            pass
-
-
-def _patch_openai() -> None:
-    try:
-        import openai
-    except ImportError:
-        return
-
-    if not hasattr(openai, "OpenAI"):
-        return
-
-    if "openai" in _config["patched"]:
-        return
-
-    original_openai = openai.OpenAI
-    _config["originals"]["openai.OpenAI"] = original_openai
-
-    class AgentLensOpenAI:
-        def __init__(self, *args: Any, **kwargs: Any):
-            self._agentlens_client = original_openai(*args, **kwargs)
-            self.chat = _OpenAIChatProxy(self._agentlens_client.chat)
-            if hasattr(self._agentlens_client, "responses"):
-                self.responses = _OpenAIResponsesProxy(self._agentlens_client.responses)
-
-        def __getattr__(self, name: str) -> Any:
-            return getattr(self._agentlens_client, name)
-
-    openai.OpenAI = AgentLensOpenAI
-    _config["patched"].add("openai")
-
-
-def _patch_openai_async() -> None:
-    """Patch openai.AsyncOpenAI so async agents are captured."""
-    try:
-        import openai
-    except ImportError:
-        return
-
-    if not hasattr(openai, "AsyncOpenAI"):
-        return
-
-    if "openai_async" in _config["patched"]:
-        return
-
-    original_async = openai.AsyncOpenAI
-    _config["originals"]["openai.AsyncOpenAI"] = original_async
-
-    class AgentLensAsyncOpenAI:
-        def __init__(self, *args: Any, **kwargs: Any):
-            self._agentlens_client = original_async(*args, **kwargs)
-            self.chat = _AsyncOpenAIChatProxy(self._agentlens_client.chat)
-            if hasattr(self._agentlens_client, "responses"):
-                self.responses = _AsyncOpenAIResponsesProxy(self._agentlens_client.responses)
-
-        def __getattr__(self, name: str) -> Any:
-            return getattr(self._agentlens_client, name)
-
-    openai.AsyncOpenAI = AgentLensAsyncOpenAI
-    _config["patched"].add("openai_async")
-
-
-class _OpenAIChatProxy:
-    def __init__(self, chat: Any):
-        self._chat = chat
-        self.completions = _OpenAICompletionsProxy(chat.completions)
-
-    def __getattr__(self, name: str) -> Any:
-        return getattr(self._chat, name)
-
-
-class _OpenAICompletionsProxy:
-    def __init__(self, completions: Any):
-        self._completions = completions
-
-    def create(self, **kwargs: Any) -> Any:
-        if kwargs.get("stream"):
-            return self._create_stream(**kwargs)
-        started = time.perf_counter()
-        try:
-            response = self._completions.create(**kwargs)
-            response_json = _to_jsonable(response)
-            usage = response_json.get("usage") if isinstance(response_json, dict) else None
-            model = kwargs.get("model")
-            append_span(
-                {
-                    "type": "llm_call",
-                    "provider": "openai",
-                    "ts": _now_iso(),
-                    "latency_ms": _elapsed_ms(started),
-                    "input_messages": _to_jsonable(kwargs.get("messages", [])),
-                    "tools": _to_jsonable(kwargs.get("tools", kwargs.get("functions", []))),
-                    "model": model,
-                    "response_content": response_json,
-                    "stop_reason": _first_choice_stop_reason(response_json),
-                    "usage": usage,
-                    "cost_usd": compute_cost_usd(model, usage if isinstance(usage, dict) else {}),
-                }
-            )
-            capture_openai_tool_calls(response_json)
-            return response
-        except Exception as exc:
-            capture_error(exc, context=_openai_context(kwargs), latency_ms=_elapsed_ms(started))
-            raise
-
-    def _create_stream(self, **kwargs: Any) -> "_OpenAIStreamWrapper":
-        started = time.perf_counter()
-        try:
-            raw_stream = self._completions.create(**kwargs)
-        except Exception as exc:
-            capture_error(exc, context=_openai_context(kwargs), latency_ms=_elapsed_ms(started))
-            raise
-        return _OpenAIStreamWrapper(raw_stream, kwargs, started)
-
-    def __getattr__(self, name: str) -> Any:
-        return getattr(self._completions, name)
-
-
-def _accumulate_openai_stream(
-    chunks: list[Any],
-) -> tuple[dict[str, Any], dict[str, Any] | None, str | None]:
-    """Rebuild a non-streaming-shaped response from streamed chunks.
-
-    Streaming deltas carry text in ``delta.content`` and tool calls in
-    ``delta.tool_calls`` (whose ``arguments`` arrive in fragments keyed by
-    ``index``). Earlier this only kept text, so a streamed tool-call response
-    produced an empty response_content and no captured tool request. We
-    reassemble both into the same {choices:[{message:{...}}]} shape the
-    non-streaming path emits so downstream preprocessing and tool capture are
-    uniform across streaming and non-streaming.
-    """
-    text_parts: list[str] = []
-    tool_calls_by_index: dict[int, dict[str, Any]] = {}
-    usage: dict[str, Any] | None = None
-    stop_reason: str | None = None
-
-    for chunk in chunks:
-        chunk_json = _to_jsonable(chunk)
-        if not isinstance(chunk_json, dict):
-            continue
-        if chunk_json.get("usage"):
-            usage = chunk_json["usage"]
-        for choice in chunk_json.get("choices") or []:
-            if not isinstance(choice, dict):
-                continue
-            if choice.get("finish_reason"):
-                stop_reason = choice["finish_reason"]
-            delta = choice.get("delta") or {}
-            if not isinstance(delta, dict):
-                continue
-            if delta.get("content"):
-                text_parts.append(str(delta["content"]))
-            for tool_call in delta.get("tool_calls") or []:
-                if not isinstance(tool_call, dict):
-                    continue
-                index = tool_call.get("index", 0)
-                slot = tool_calls_by_index.setdefault(
-                    index,
-                    {"id": None, "type": "function", "function": {"name": "", "arguments": ""}},
-                )
-                if tool_call.get("id"):
-                    slot["id"] = tool_call["id"]
-                function = tool_call.get("function") or {}
-                if function.get("name"):
-                    slot["function"]["name"] = function["name"]
-                if function.get("arguments"):
-                    slot["function"]["arguments"] += function["arguments"]
-
-    message: dict[str, Any] = {
-        "role": "assistant",
-        "content": "".join(text_parts) or None,
-    }
-    if tool_calls_by_index:
-        message["tool_calls"] = [tool_calls_by_index[i] for i in sorted(tool_calls_by_index)]
-
-    response_json = {
-        "choices": [{"message": message, "finish_reason": stop_reason}],
-        "usage": usage,
-    }
-    return response_json, usage, stop_reason
-
-
-class _OpenAIStreamWrapper:
-    """Wraps an OpenAI streaming response and saves a span on completion."""
-
-    def __init__(self, stream: Any, kwargs: dict[str, Any], started: float) -> None:
-        self._stream = stream
-        self._kwargs = kwargs
-        self._started = started
-        self._chunks: list[Any] = []
-        self._finalized = False
-        self._iter: Any = None
-
-    def __iter__(self) -> Any:
-        self._iter = iter(self._stream)
-        return self
-
-    def __next__(self) -> Any:
-        try:
-            chunk = next(self._iter)
-            self._chunks.append(chunk)
-            return chunk
-        except StopIteration:
-            self._finalize()
-            raise
-
-    def __enter__(self) -> Any:
-        if hasattr(self._stream, "__enter__"):
-            self._stream.__enter__()
-        return self
-
-    def __exit__(self, *args: Any) -> Any:
-        result = None
-        if hasattr(self._stream, "__exit__"):
-            result = self._stream.__exit__(*args)
-        self._finalize()
-        return result
-
-    def _finalize(self) -> None:
-        if self._finalized:
-            return
-        self._finalized = True
-        try:
-            response_json, usage, stop_reason = _accumulate_openai_stream(self._chunks)
-            model = self._kwargs.get("model")
-            append_span(
-                {
-                    "type": "llm_call",
-                    "provider": "openai",
-                    "ts": _now_iso(),
-                    "latency_ms": _elapsed_ms(self._started),
-                    "input_messages": _to_jsonable(self._kwargs.get("messages", [])),
-                    "tools": _to_jsonable(self._kwargs.get("tools", self._kwargs.get("functions", []))),
-                    "model": model,
-                    "response_content": response_json,
-                    "stop_reason": stop_reason,
-                    "usage": _to_jsonable(usage),
-                    "cost_usd": compute_cost_usd(model, usage if isinstance(usage, dict) else {}),
-                    "streaming": True,
-                    "chunk_count": len(self._chunks),
-                }
-            )
-            # Capture tool requests the same way the non-streaming path does, so
-            # streamed tool calls are recorded even when the agent does not call
-            # record_tool_result explicitly, and the dedup merge has a request
-            # span to fill.
-            capture_openai_tool_calls(response_json)
-        except Exception:
-            pass
-
-
-class _OpenAIResponsesProxy:
-    def __init__(self, responses: Any):
-        self._responses = responses
-
-    def create(self, **kwargs: Any) -> Any:
-        started = time.perf_counter()
-        try:
-            response = self._responses.create(**kwargs)
-            response_json = _to_jsonable(response)
-            usage = response_json.get("usage") if isinstance(response_json, dict) else None
-            model = kwargs.get("model")
-            append_span(
-                {
-                    "type": "llm_call",
-                    "provider": "openai",
-                    "ts": _now_iso(),
-                    "latency_ms": _elapsed_ms(started),
-                    "input_messages": _to_jsonable(kwargs.get("input")),
-                    "tools": _to_jsonable(kwargs.get("tools", [])),
-                    "model": model,
-                    "response_content": response_json,
-                    "stop_reason": response_json.get("status") if isinstance(response_json, dict) else None,
-                    "usage": usage,
-                    "cost_usd": compute_cost_usd(model, usage if isinstance(usage, dict) else {}),
-                }
-            )
-            capture_openai_tool_calls(response_json)
-            return response
-        except Exception as exc:
-            capture_error(exc, context=_openai_context(kwargs), latency_ms=_elapsed_ms(started))
-            raise
-
-    def __getattr__(self, name: str) -> Any:
-        return getattr(self._responses, name)
-
-
-class _AsyncAnthropicMessagesProxy:
-    """Async proxy for anthropic.AsyncAnthropic().messages — mirrors _AnthropicMessagesProxy."""
-
-    def __init__(self, messages: Any) -> None:
-        self._messages = messages
-
-    async def create(self, **kwargs: Any) -> Any:
-        started = time.perf_counter()
-        capture_tool_results_from_messages(kwargs.get("messages", []), provider="anthropic")
-        try:
-            response = await self._messages.create(**kwargs)
-            response_content = _to_jsonable(getattr(response, "content", None))
-            usage = _to_jsonable(getattr(response, "usage", None))
-            model = kwargs.get("model")
-            append_span(
-                {
-                    "type": "llm_call",
-                    "provider": "anthropic",
-                    "ts": _now_iso(),
-                    "latency_ms": _elapsed_ms(started),
-                    "input_messages": _to_jsonable(kwargs.get("messages", [])),
-                    "tools": _to_jsonable(kwargs.get("tools", [])),
-                    "model": model,
-                    "response_content": response_content,
-                    "stop_reason": getattr(response, "stop_reason", None),
-                    "usage": usage,
-                    "cost_usd": compute_cost_usd(model, usage if isinstance(usage, dict) else {}),
-                    "async": True,
-                }
-            )
-            capture_anthropic_tool_calls(response_content)
-            return response
-        except Exception as exc:
-            capture_error(exc, context=_anthropic_context(kwargs), latency_ms=_elapsed_ms(started))
-            raise
-
-    def stream(self, **kwargs: Any) -> "_AsyncAnthropicStreamContext":
-        """Return an async context manager for streaming — supports:
-            async with client.messages.stream(...) as s:   (standard Anthropic pattern)
-        """
-        started = time.perf_counter()
-        capture_tool_results_from_messages(kwargs.get("messages", []), provider="anthropic")
-        try:
-            ctx = self._messages.stream(**kwargs)
-        except Exception as exc:
-            capture_error(exc, context=_anthropic_context(kwargs), latency_ms=_elapsed_ms(started))
-            raise
-        return _AsyncAnthropicStreamContext(ctx, kwargs, started)
-
-    def __getattr__(self, name: str) -> Any:
-        return getattr(self._messages, name)
-
-
-class _AsyncAnthropicStreamContext:
-    """Async context manager wrapper that saves a span when async Anthropic streaming completes.
-
-    Supports:
-        async with client.messages.stream(...) as s:
-            async for chunk in s: ...
-    """
-
-    def __init__(self, ctx: Any, kwargs: dict[str, Any], started: float) -> None:
-        self._ctx = ctx
-        self._kwargs = kwargs
-        self._started = started
-        self._stream: Any = None
-
-    async def __aenter__(self) -> Any:
-        self._stream = await self._ctx.__aenter__()
-        return self._stream
-
-    async def __aexit__(self, *args: Any) -> Any:
-        result = await self._ctx.__aexit__(*args)
-        await self._save_span()
-        return result
-
-    async def _save_span(self) -> None:
-        if self._stream is None:
-            return
-        try:
-            get_final = getattr(self._stream, "get_final_message", None)
-            message = await get_final() if get_final and asyncio.iscoroutinefunction(get_final) else (get_final() if get_final else None)
-            if message is None:
-                return
-            response_content = _to_jsonable(getattr(message, "content", None))
-            usage = _to_jsonable(getattr(message, "usage", None))
-            model = self._kwargs.get("model")
-            append_span(
-                {
-                    "type": "llm_call",
-                    "provider": "anthropic",
-                    "ts": _now_iso(),
-                    "latency_ms": _elapsed_ms(self._started),
-                    "input_messages": _to_jsonable(self._kwargs.get("messages", [])),
-                    "tools": _to_jsonable(self._kwargs.get("tools", [])),
-                    "model": model,
-                    "response_content": response_content,
-                    "stop_reason": getattr(message, "stop_reason", None),
-                    "usage": usage,
-                    "cost_usd": compute_cost_usd(model, usage if isinstance(usage, dict) else {}),
-                    "streaming": True,
-                    "async": True,
-                }
-            )
-            capture_anthropic_tool_calls(response_content)
-        except Exception:
-            pass
-
-
-class _AsyncOpenAIChatProxy:
-    def __init__(self, chat: Any) -> None:
-        self._chat = chat
-        self.completions = _AsyncOpenAICompletionsProxy(chat.completions)
-
-    def __getattr__(self, name: str) -> Any:
-        return getattr(self._chat, name)
-
-
-class _AsyncOpenAICompletionsProxy:
-    """Async proxy for openai.AsyncOpenAI().chat.completions."""
-
-    def __init__(self, completions: Any) -> None:
-        self._completions = completions
-
-    async def create(self, **kwargs: Any) -> Any:
-        started = time.perf_counter()
-        try:
-            response = await self._completions.create(**kwargs)
-            response_json = _to_jsonable(response)
-            usage = response_json.get("usage") if isinstance(response_json, dict) else None
-            model = kwargs.get("model")
-            append_span(
-                {
-                    "type": "llm_call",
-                    "provider": "openai",
-                    "ts": _now_iso(),
-                    "latency_ms": _elapsed_ms(started),
-                    "input_messages": _to_jsonable(kwargs.get("messages", [])),
-                    "tools": _to_jsonable(kwargs.get("tools", kwargs.get("functions", []))),
-                    "model": model,
-                    "response_content": response_json,
-                    "stop_reason": _first_choice_stop_reason(response_json),
-                    "usage": usage,
-                    "cost_usd": compute_cost_usd(model, usage if isinstance(usage, dict) else {}),
-                    "async": True,
-                }
-            )
-            capture_openai_tool_calls(response_json)
-            return response
-        except Exception as exc:
-            capture_error(exc, context=_openai_context(kwargs), latency_ms=_elapsed_ms(started))
-            raise
-
-    def __getattr__(self, name: str) -> Any:
-        return getattr(self._completions, name)
-
-
-class _AsyncOpenAIResponsesProxy:
-    """Async proxy for openai.AsyncOpenAI().responses."""
-
-    def __init__(self, responses: Any) -> None:
-        self._responses = responses
-
-    async def create(self, **kwargs: Any) -> Any:
-        started = time.perf_counter()
-        try:
-            response = await self._responses.create(**kwargs)
-            response_json = _to_jsonable(response)
-            usage = response_json.get("usage") if isinstance(response_json, dict) else None
-            model = kwargs.get("model")
-            append_span(
-                {
-                    "type": "llm_call",
-                    "provider": "openai",
-                    "ts": _now_iso(),
-                    "latency_ms": _elapsed_ms(started),
-                    "input_messages": _to_jsonable(kwargs.get("input")),
-                    "tools": _to_jsonable(kwargs.get("tools", [])),
-                    "model": model,
-                    "response_content": response_json,
-                    "stop_reason": response_json.get("status") if isinstance(response_json, dict) else None,
-                    "usage": usage,
-                    "cost_usd": compute_cost_usd(model, usage if isinstance(usage, dict) else {}),
-                    "async": True,
-                }
-            )
-            capture_openai_tool_calls(response_json)
-            return response
-        except Exception as exc:
-            capture_error(exc, context=_openai_context(kwargs), latency_ms=_elapsed_ms(started))
-            raise
-
-    def __getattr__(self, name: str) -> Any:
-        return getattr(self._responses, name)
+    def __init__(self, messages):
+        self.messages = messages
+
+    def create(self, **kwargs):
+        if getattr(self.messages.create, '_agentlens_wrapped', False):
+            return self.messages.create(**kwargs)
+        return _capture_sync(lambda: self.messages.create(**kwargs), kwargs, 'anthropic', 'messages')
 
 
 def load_runs() -> list[dict[str, Any]]:
-    if not RUNS_DIR.exists():
-        return []
     runs = []
-    for path in sorted(RUNS_DIR.glob("*.json"), key=lambda item: item.stat().st_mtime, reverse=True):
-        try:
-            runs.append(json.loads(path.read_text(encoding="utf-8")))
-        except json.JSONDecodeError:
-            continue
+    errors = []
+    if RUNS_DIR.exists():
+        for path in RUNS_DIR.glob('*.json'):
+            try:
+                runs.append(read_run(safe_path(RUNS_DIR, path.stem)))
+            except ValueError as exc:
+                errors.append(str(exc))
+    runs.sort(key=lambda item: item.get('started_at') or '', reverse=True)
+    if errors:
+        raise InvalidRunFilesError(errors, runs)
     return runs
 
 
 def load_run(run_id: str) -> dict[str, Any] | None:
-    path = RUNS_DIR / f"{run_id}.json"
-    if not path.exists():
-        matches = [run for run in load_runs() if run.get("run_id", "").startswith(run_id)]
-        if len(matches) == 1:
-            return matches[0]
-        if len(matches) > 1:
-            match_ids = [str(run.get("run_id", "")) for run in matches if run.get("run_id")]
-            raise AmbiguousRunIdError(run_id, match_ids)
-        return None
-    try:
-        return json.loads(path.read_text(encoding="utf-8"))
-    except (json.JSONDecodeError, OSError) as exc:
-        # A run file can be truncated or corrupt if the process died mid-save.
-        # Don't crash the whole command over one bad file — report and move on.
-        print(f"Could not read run '{run_id}': file is corrupt or unreadable ({exc}).")
-        return None
+    path = safe_path(RUNS_DIR, run_id)
+    if path.exists():
+        return read_run(path)
+    matches = sorted(p for p in RUNS_DIR.glob('*.json') if p.stem.startswith(run_id))
+    if len(matches) > 1:
+        raise AmbiguousRunIdError(run_id, [p.stem for p in matches])
+    return read_run(safe_path(RUNS_DIR, matches[0].stem)) if matches else None
 
 
 def _now_iso() -> str:
@@ -1057,120 +659,79 @@ def _elapsed_ms(started: float) -> float:
     return round((time.perf_counter() - started) * 1000, 2)
 
 
-def _anthropic_context(kwargs: dict[str, Any]) -> dict[str, Any]:
-    return {
-        "provider": "anthropic",
-        "input_messages": _to_jsonable(kwargs.get("messages", [])),
-        "model": kwargs.get("model"),
-        "tools": _to_jsonable(kwargs.get("tools", [])),
-    }
-
-
-def _openai_context(kwargs: dict[str, Any]) -> dict[str, Any]:
-    return {
-        "provider": "openai",
-        "input_messages": _to_jsonable(kwargs.get("messages", kwargs.get("input"))),
-        "model": kwargs.get("model"),
-        "tools": _to_jsonable(kwargs.get("tools", kwargs.get("functions", []))),
-    }
-
-
-def _to_jsonable(value: Any) -> Any:
+def _to_jsonable(value: Any, depth: int = 0) -> Any:
+    import dataclasses
+    from types import SimpleNamespace
+    if depth > 30:
+        return '[unsupported nested value]'
     if value is None or isinstance(value, (str, int, float, bool)):
         return value
-    if isinstance(value, list):
-        return [_to_jsonable(item) for item in value]
-    if isinstance(value, tuple):
-        return [_to_jsonable(item) for item in value]
+    if isinstance(value, (list, tuple)):
+        return [_to_jsonable(item, depth + 1) for item in value]
     if isinstance(value, dict):
-        return {str(key): _to_jsonable(item) for key, item in value.items()}
-    if hasattr(value, "model_dump"):
-        return _to_jsonable(value.model_dump())
-    if hasattr(value, "to_dict"):
-        return _to_jsonable(value.to_dict())
-    if hasattr(value, "__dict__"):
-        return _to_jsonable(vars(value))
-    return str(value)
+        return {str(key): _to_jsonable(item, depth + 1) for key, item in value.items()}
+    if hasattr(value, 'model_dump'):
+        return _to_jsonable(value.model_dump(mode='json'), depth + 1)
+    if dataclasses.is_dataclass(value) and not isinstance(value, type):
+        return {field.name: _to_jsonable(getattr(value, field.name), depth + 1) for field in dataclasses.fields(value)}
+    if isinstance(value, SimpleNamespace):
+        return _to_jsonable(vars(value), depth + 1)
+    return f'<{type(value).__name__}>'
 
 
 def _as_list(value: Any) -> list[Any]:
-    if value is None:
-        return []
-    if isinstance(value, list):
-        return value
-    return [value]
+    return value if isinstance(value, list) else ([] if value is None else [value])
 
 
 def _get_value(value: Any, key: str) -> Any:
-    if isinstance(value, dict):
-        return value.get(key)
-    return getattr(value, key, None)
+    return value.get(key) if isinstance(value, dict) else getattr(value, key, None)
 
 
 def _is_error_output(output: Any) -> bool:
-    if not isinstance(output, dict):
-        return False
-    if output.get("status") == "error":
-        return True
-    # Only flag "error" key if its value is truthy — {"error": None} is not an error
-    error_val = output.get("error")
-    return error_val is not None and bool(error_val)
+    return tool_error(output)
 
 
 def _extract_error_message(output: Any) -> str:
-    if isinstance(output, dict):
-        return str(output.get("error") or output)
-    return str(output)
+    return str(output.get('error') or output) if isinstance(output, dict) else str(output)
 
 
 def _parse_maybe_json(value: Any) -> Any:
-    if not isinstance(value, str):
-        return _to_jsonable(value)
-    try:
-        return json.loads(value)
-    except json.JSONDecodeError:
-        return value
+    if isinstance(value, str):
+        try:
+            return json.loads(value)
+        except ValueError:
+            pass
+    return value
 
 
 def _find_tool_calls(value: Any) -> list[dict[str, Any]]:
-    found: list[dict[str, Any]] = []
-    _collect_tool_calls(value, found)
-    # Deduplicate by tool call id — nested OpenAI response structures surface
-    # the same call at multiple levels (e.g. top-level and inside choices[].message)
-    seen_ids: set[str] = set()
-    deduped: list[dict[str, Any]] = []
-    for item in found:
-        call_id = item.get("id")
-        if call_id:
-            if call_id in seen_ids:
-                continue
-            seen_ids.add(call_id)
-        deduped.append(item)
-    return deduped
-
-
-def _collect_tool_calls(value: Any, found: list[dict[str, Any]]) -> None:
+    result = []
     if isinstance(value, dict):
-        maybe_calls = value.get("tool_calls")
-        if isinstance(maybe_calls, list):
-            found.extend(item for item in maybe_calls if isinstance(item, dict))
-        # Skip the tool_calls key itself to avoid recursing into calls we already collected
+        if value.get('type') == 'function_call':
+            result.append({'id': value.get('call_id') or value.get('id'), 'function': {'name': value.get('name'), 'arguments': value.get('arguments')}})
         for key, item in value.items():
-            if key != "tool_calls":
-                _collect_tool_calls(item, found)
+            if key == 'tool_calls' and isinstance(item, list):
+                result.extend(call for call in item if isinstance(call, dict))
+            elif isinstance(item, (dict, list)):
+                result.extend(_find_tool_calls(item))
     elif isinstance(value, list):
         for item in value:
-            _collect_tool_calls(item, found)
+            result.extend(_find_tool_calls(item))
+    ids = set()
+    unique = []
+    for call in result:
+        identity = call.get('id')
+        if identity and identity in ids:
+            continue
+        ids.add(identity)
+        unique.append(call)
+    return unique
 
 
-def _first_choice_stop_reason(response_json: Any) -> Any:
-    if not isinstance(response_json, dict):
-        return None
-    choices = response_json.get("choices")
-    if isinstance(choices, list) and choices:
-        return choices[0].get("finish_reason")
-    return None
+def _first_choice_stop_reason(response: Any) -> Any:
+    choices = response.get('choices') if isinstance(response, dict) else None
+    return choices[0].get('finish_reason') if isinstance(choices, list) and choices else None
 
 
 def _run_has_error_span(run_data: dict[str, Any]) -> bool:
-    return any(span.get("type") == "error" for span in run_data.get("spans", []))
+    return any(span.get('type') == 'error' for span in run_data.get('spans', []))

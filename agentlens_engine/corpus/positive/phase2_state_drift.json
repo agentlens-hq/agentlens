@@ -1,0 +1,67 @@
+{
+  "run_id": "phase2_state_drift",
+  "name": "state_drift_case",
+  "started_at": "2026-05-07T04:00:00+00:00",
+  "ended_at": "2026-05-07T04:05:00+00:00",
+  "status": "error",
+  "spans": [
+    {
+      "type": "llm_call",
+      "provider": "anthropic",
+      "model": "claude-3-5-sonnet-latest",
+      "latency_ms": 18.4,
+      "input_messages": [
+        {
+          "role": "user",
+          "content": "Resolve the refund status for customer:alex."
+        }
+      ],
+      "tools": [],
+      "response_content": [
+        {
+          "type": "text",
+          "text": "I lost the original goal and switched topics to weather."
+        }
+      ],
+      "stop_reason": "tool_use",
+      "usage": {
+        "input_tokens": 320,
+        "output_tokens": 64
+      },
+      "id": "phase2_state_drift_span_1",
+      "run_id": "phase2_state_drift",
+      "ts": "2026-05-07T04:01:00+00:00"
+    },
+    {
+      "type": "tool_call",
+      "tool_name": "weather_api",
+      "input": {
+        "city": "San Francisco"
+      },
+      "output": {
+        "status": "error",
+        "error": "unrelated tool call"
+      },
+      "tool_use_id": "toolu_weather_api",
+      "id": "phase2_state_drift_span_2",
+      "run_id": "phase2_state_drift",
+      "ts": "2026-05-07T04:02:00+00:00"
+    },
+    {
+      "type": "error",
+      "error": "The agent lost original goal and made an unrelated weather request.",
+      "context": {
+        "original_goal": "refund status for customer:alex",
+        "actual_tool": "weather_api"
+      },
+      "id": "phase2_state_drift_span_3",
+      "run_id": "phase2_state_drift",
+      "ts": "2026-05-07T04:03:00+00:00"
+    }
+  ],
+  "expected_diagnosis": {
+    "root_cause_category": "state_drift",
+    "failed_at_step": 1
+  },
+  "evaluation_kind": "synthetic"
+}

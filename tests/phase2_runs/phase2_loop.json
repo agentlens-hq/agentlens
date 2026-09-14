@@ -90,7 +90,7 @@
         "status": "error",
         "error": "temporary timeout"
       },
-      "tool_use_id": "toolu_query_db",
+      "tool_use_id": "toolu_query_db_retry",
       "id": "phase2_loop_span_4",
       "run_id": "phase2_loop",
       "ts": "2026-05-07T04:04:00+00:00"

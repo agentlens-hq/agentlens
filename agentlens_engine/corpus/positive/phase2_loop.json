@@ -1,0 +1,114 @@
+{
+  "run_id": "phase2_loop",
+  "name": "loop_case",
+  "started_at": "2026-05-07T04:00:00+00:00",
+  "ended_at": "2026-05-07T04:05:00+00:00",
+  "status": "error",
+  "spans": [
+    {
+      "type": "llm_call",
+      "provider": "openai",
+      "model": "gpt-4.1-mini",
+      "latency_ms": 18.4,
+      "input_messages": [
+        {
+          "role": "user",
+          "content": "Fetch customer:alex renewal status from local records."
+        }
+      ],
+      "tools": [],
+      "response_content": {
+        "choices": [
+          {
+            "message": {
+              "content": "I will call query_db."
+            }
+          }
+        ]
+      },
+      "stop_reason": "tool_use",
+      "usage": {
+        "input_tokens": 320,
+        "output_tokens": 64
+      },
+      "id": "phase2_loop_span_1",
+      "run_id": "phase2_loop",
+      "ts": "2026-05-07T04:01:00+00:00"
+    },
+    {
+      "type": "tool_call",
+      "tool_name": "query_db",
+      "input": {
+        "query": "customer:alex"
+      },
+      "output": {
+        "status": "error",
+        "error": "temporary timeout"
+      },
+      "tool_use_id": "toolu_query_db",
+      "id": "phase2_loop_span_2",
+      "run_id": "phase2_loop",
+      "ts": "2026-05-07T04:02:00+00:00"
+    },
+    {
+      "type": "llm_call",
+      "provider": "openai",
+      "model": "gpt-4.1-mini",
+      "latency_ms": 18.4,
+      "input_messages": [
+        {
+          "role": "assistant",
+          "content": "Retrying the same call."
+        }
+      ],
+      "tools": [],
+      "response_content": {
+        "choices": [
+          {
+            "message": {
+              "content": "I will retry query_db with the same input."
+            }
+          }
+        ]
+      },
+      "stop_reason": "tool_use",
+      "usage": {
+        "input_tokens": 320,
+        "output_tokens": 64
+      },
+      "id": "phase2_loop_span_3",
+      "run_id": "phase2_loop",
+      "ts": "2026-05-07T04:03:00+00:00"
+    },
+    {
+      "type": "tool_call",
+      "tool_name": "query_db",
+      "input": {
+        "query": "customer:alex"
+      },
+      "output": {
+        "status": "error",
+        "error": "temporary timeout"
+      },
+      "tool_use_id": "toolu_query_db_retry",
+      "id": "phase2_loop_span_4",
+      "run_id": "phase2_loop",
+      "ts": "2026-05-07T04:04:00+00:00"
+    },
+    {
+      "type": "error",
+      "error": "Repeated query_db with the same input and no exit condition.",
+      "context": {
+        "tool_name": "query_db"
+      },
+      "id": "phase2_loop_span_5",
+      "run_id": "phase2_loop",
+      "ts": "2026-05-07T04:05:00+00:00"
+    }
+  ],
+  "expected_diagnosis": {
+    "root_cause_category": "loop",
+    "failed_at_step": 2
+  },
+  "evaluation_kind": "synthetic"
+}

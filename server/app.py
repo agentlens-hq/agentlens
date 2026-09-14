@@ -17,7 +17,6 @@ from __future__ import annotations
 
 import json
 import os
-import re
 import sqlite3
 from contextlib import closing
 from datetime import datetime, timezone
@@ -29,26 +28,17 @@ from fastapi import FastAPI, HTTPException, Query
 from fastapi.responses import HTMLResponse
 from pydantic import BaseModel, ConfigDict
 
+from agentlens_core.privacy import residual
+from agentlens_core.storage import safe_path
+from agentlens_core.trace import MAX_RUN_BYTES, normalize_run
 from agentlens_engine.diagnose import diagnose_run
 from agentlens_engine.status import run_status
 
 DB_PATH = Path(os.environ.get("AGENTLENS_DB", ".agentlens_server.db"))
 ENGINE_VERSION = "1"  # bump to invalidate stored diagnoses; drives /reclassify
 
-# Last-line PII gate at the ingest boundary. A leak here is the one that lands
-# in the hosted store, so ingest fails closed if any of these survive.
-_PII_PATTERNS = {
-    "email": r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}",
-    "ssn": r"\b\d{3}-\d{2}-\d{4}\b",
-    "credit_card": r"\b(?:\d[ -]?){15,16}\b",
-    "phone": r"(?:\+?1[-.\s]?)?\(?\d{3}\)?[-.\s]\d{3}[-.\s]\d{4}\b",
-    "api_key": r"\bsk-[A-Za-z0-9_-]{12,}\b",
-}
-
-
 def _residual_pii(payload: dict[str, Any]) -> list[str]:
-    blob = json.dumps(payload, default=str)
-    return [kind for kind, pattern in _PII_PATTERNS.items() if re.search(pattern, blob)]
+    return residual(payload)
 
 
 SCHEMA = """
@@ -160,13 +150,13 @@ def ingest(body: IngestBody) -> dict[str, Any]:
         # Fail closed: refuse to store data that still contains PII.
         raise HTTPException(status_code=422, detail={"error": "residual_pii", "kinds": leaks})
 
-    run = {
-        "run_id": body.run_id,
-        "name": body.name,
-        "status": body.status,
-        "started_at": body.started_at,
-        "spans": body.spans,
-    }
+    try:
+        if len(json.dumps(payload, allow_nan=False).encode("utf-8")) > MAX_RUN_BYTES:
+            raise ValueError("Run exceeds the 20 MiB ingestion limit.")
+        safe_path(Path(".agentlens"), body.run_id)
+        run = normalize_run(payload, strict=True)
+    except (ValueError, RecursionError) as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
     created_at = body.started_at or _now()
     result = _diagnose_and_store(run, created_at)
     status = result["status"]

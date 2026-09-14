@@ -20,6 +20,9 @@ import re
 from pathlib import Path
 from typing import Any
 
+from agentlens_core.trace import normalize_run, read_run
+
+from .diagnose import diagnose_run
 
 # ── Public API ────────────────────────────────────────────────────────────────
 
@@ -62,9 +65,9 @@ def find_similar_failures(
         if rid == target_run_id:
             continue
         # Only compare failed runs
-        if run.get("status") not in ("error", "failure"):
-            continue
         fp = _fingerprint_from_run(run)
+        if fp["category"] == "unknown":
+            continue
         score, reason = _score(target_fp, fp)
         if score >= min_score:
             scored.append((score, {"_run": run, "_fp": fp, "_reason": reason, "_score": score}))
@@ -92,15 +95,15 @@ def find_similar_failures(
 
 def build_failure_library(runs_dir: Path) -> list[dict[str, Any]]:
     """Load all runs from *runs_dir* and return those that have a failure fingerprint."""
-    library = []
+    library: list[dict[str, Any]] = []
     if not runs_dir.exists():
         return library
     for path in runs_dir.glob("*.json"):
         try:
-            run = json.loads(path.read_text(encoding="utf-8"))
-        except (json.JSONDecodeError, OSError):
+            run = read_run(path)
+        except (ValueError, OSError):
             continue
-        if run.get("status") in ("error", "failure"):
+        if diagnose_run(run)["root_cause_category"] != "unknown":
             library.append(run)
     return library
 
@@ -126,57 +129,8 @@ def _fingerprint(run: dict[str, Any], diagnosis: dict[str, Any]) -> dict[str, An
 
 
 def _fingerprint_from_run(run: dict[str, Any]) -> dict[str, Any]:
-    """Best-effort fingerprint when we don't have a diagnosis stored."""
-    spans = _safe_spans(run)
-    tools = frozenset(
-        s["tool_name"] for s in spans
-        if s.get("type") == "tool_call" and s.get("tool_name")
-    )
-    providers = {s.get("provider") for s in spans if s.get("type") == "llm_call" and s.get("provider")}
-    error_kw = _error_keywords(spans)
+    return _fingerprint(run, diagnose_run(run))
 
-    # Try to read a stored diagnosis from the run itself (we write it in)
-    diag = run.get("_diagnosis") or {}
-    category = diag.get("root_cause_category") or ""
-
-    # Heuristic category fallback from error text
-    if not category:
-        all_text = _all_text(spans).lower()
-        if "context window" in all_text or "truncated" in all_text:
-            category = "overflow"
-        elif any(_tool_repeat(spans)):
-            category = "loop"
-        elif _has_ambiguous_tools(spans):
-            category = "tool_selection"
-        elif "stale" in all_text or "corrupted" in all_text:
-            category = "cascade"
-
-    failed_tool = diag.get("failed_at_tool")
-    if not failed_tool:
-        # Heuristic: last error span's context tool_name, or first erroring tool_call
-        for s in reversed(spans):
-            if s.get("type") == "error":
-                failed_tool = (s.get("context") or {}).get("tool_name")
-                break
-        if not failed_tool:
-            for s in spans:
-                if s.get("type") == "tool_call":
-                    out = s.get("output")
-                    if isinstance(out, dict) and (out.get("status") == "error" or out.get("error")):
-                        failed_tool = s.get("tool_name")
-                        break
-
-    return {
-        "category": category,
-        "tools": tools,
-        "failed_tool": failed_tool,
-        "error_keywords": error_kw,
-        "provider": next(iter(providers), None),
-        "cached_fix": diag.get("fix") or "",
-    }
-
-
-# ── Scoring ───────────────────────────────────────────────────────────────────
 
 def _score(a: dict[str, Any], b: dict[str, Any]) -> tuple[float, str]:
     """Return (similarity_score, reason_string)."""
@@ -251,12 +205,7 @@ def _error_keywords(spans: list[dict[str, Any]]) -> frozenset[str]:
 
 
 def _safe_spans(run: dict[str, Any]) -> list[dict[str, Any]]:
-    spans = run.get("spans") or []
-    return [s for s in spans if isinstance(s, dict)]
-
-
-def _all_text(spans: list[dict[str, Any]]) -> str:
-    return json.dumps(spans, default=str)
+    return normalize_run(run)["spans"]
 
 
 def _to_str(value: Any) -> str:
@@ -265,45 +214,3 @@ def _to_str(value: Any) -> str:
     if isinstance(value, str):
         return value
     return json.dumps(value, default=str)
-
-
-def _tool_repeat(spans: list[dict[str, Any]]) -> list[str]:
-    seen: set[str] = set()
-    repeated = []
-    for s in spans:
-        if s.get("type") != "tool_call" or not s.get("tool_name"):
-            continue
-        key = json.dumps({"tool": s.get("tool_name"), "input": s.get("input")}, sort_keys=True, default=str)
-        if key in seen:
-            repeated.append(s["tool_name"])
-        seen.add(key)
-    return repeated
-
-
-def _has_ambiguous_tools(spans: list[dict[str, Any]]) -> bool:
-    """True if any two tools across the run have descriptions with Jaccard similarity >= 0.6.
-    Uses the same threshold as the classifier so similarity search matches diagnosis behaviour.
-    """
-    descriptions: list[str] = []
-    for s in spans:
-        if s.get("type") != "llm_call":
-            continue
-        for t in (s.get("tools") or []):
-            if not isinstance(t, dict):
-                continue
-            desc = (t.get("description") or (t.get("function") or {}).get("description") or "").strip().lower()
-            if desc and desc not in descriptions:
-                descriptions.append(desc)
-    for i in range(len(descriptions)):
-        for j in range(i + 1, len(descriptions)):
-            if _desc_similarity(descriptions[i], descriptions[j]) >= 0.6:
-                return True
-    return False
-
-
-def _desc_similarity(a: str, b: str) -> float:
-    words_a = set(a.split())
-    words_b = set(b.split())
-    if not words_a or not words_b:
-        return 0.0
-    return len(words_a & words_b) / len(words_a | words_b)
