@@ -22,7 +22,7 @@ from contextlib import closing
 from datetime import datetime, timezone
 from html import escape
 from pathlib import Path
-from typing import Any
+from typing import Any, Optional
 
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.responses import HTMLResponse
@@ -129,9 +129,10 @@ class IngestBody(BaseModel):
     model_config = ConfigDict(extra="allow")
     run_id: str
     spans: list[dict[str, Any]] = []
-    name: str | None = None
-    status: str | None = None
-    started_at: str | None = None
+    # Pydantic evaluates these annotations at runtime, including on Python 3.9.
+    name: Optional[str] = None
+    status: Optional[str] = None
+    started_at: Optional[str] = None
     metadata: dict[str, Any] = {}
 
 
@@ -192,8 +193,8 @@ def get_run(run_id: str) -> dict[str, Any]:
 @app.get("/api/runs")
 def api_runs(
     limit: int = Query(20, ge=1, le=200),
-    diagnosis_status: str | None = None,
-    root_cause: str | None = None,
+    diagnosis_status: Optional[str] = None,
+    root_cause: Optional[str] = None,
 ) -> dict[str, Any]:
     clauses, params = [], []
     if diagnosis_status:
