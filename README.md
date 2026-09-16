@@ -197,3 +197,8 @@ on unseen users. No zero-false-positive or live-provider benchmark is claimed.
 Real external users, confirmed usefulness and payment intent remain unverified.
 Stay in Phase 3; regression success alone is not evidence of product-market fit.
 For case format and verification commands see [release verification](docs/release_verification.md).
+
+## Contributing
+
+See [contribution.md](contribution.md) for setup, testing, pull request rules,
+privacy and security reporting, community expectations, and licensing.

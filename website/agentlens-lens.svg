@@ -1,0 +1,30 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 560 500" fill="none">
+  <defs>
+    <linearGradient id="metal" x1="120" y1="76" x2="389" y2="377" gradientUnits="userSpaceOnUse"><stop stop-color="#d3f9be"/><stop offset=".14" stop-color="#79d986"/><stop offset=".42" stop-color="#418949"/><stop offset=".68" stop-color="#193f25"/><stop offset=".86" stop-color="#60c372"/><stop offset="1" stop-color="#a0e68c"/></linearGradient>
+    <linearGradient id="edge" x1="115" y1="183" x2="416" y2="333" gradientUnits="userSpaceOnUse"><stop stop-color="#244e2e"/><stop offset=".35" stop-color="#173820"/><stop offset=".72" stop-color="#2f733e"/><stop offset="1" stop-color="#112a18"/></linearGradient>
+    <linearGradient id="handle" x1="358" y1="331" x2="479" y2="428" gradientUnits="userSpaceOnUse"><stop stop-color="#376d3b"/><stop offset=".34" stop-color="#a1e5a0"/><stop offset=".6" stop-color="#60b967"/><stop offset="1" stop-color="#20482a"/></linearGradient>
+    <linearGradient id="connection" x1="153" y1="92" x2="270" y2="238" gradientUnits="userSpaceOnUse"><stop stop-color="#647268"/><stop offset="1" stop-color="#232d26"/></linearGradient>
+    <radialGradient id="glass" cx=".3" cy=".18" r=".85"><stop stop-color="#b4e1b2" stop-opacity=".09"/><stop offset=".6" stop-color="#518965" stop-opacity=".01"/><stop offset="1" stop-color="#80c88b" stop-opacity=".07"/></radialGradient>
+    <radialGradient id="white" cx=".3" cy=".22" r=".85"><stop stop-color="#fff"/><stop offset=".48" stop-color="#dee8de"/><stop offset=".8" stop-color="#8d9e91"/><stop offset="1" stop-color="#4e5e51"/></radialGradient>
+    <radialGradient id="red" cx=".32" cy=".2" r=".85"><stop stop-color="#ffc1a9"/><stop offset=".3" stop-color="#f37d6c"/><stop offset=".65" stop-color="#d74339"/><stop offset="1" stop-color="#701b1b"/></radialGradient>
+    <radialGradient id="red-glow"><stop stop-color="#e25145" stop-opacity=".28"/><stop offset="1" stop-color="#e25145" stop-opacity="0"/></radialGradient>
+    <filter id="shadow" x="-.5" y="-1" width="2" height="3"><feGaussianBlur stdDeviation="15"/></filter>
+  </defs>
+  <ellipse cx="288" cy="424" rx="175" ry="24" fill="#000" opacity=".65" filter="url(#shadow)"/>
+  <path d="M365 335L480 433" stroke="#13351e" stroke-width="36" stroke-linecap="round"/>
+  <circle cx="261" cy="241" r="146" stroke="#142f1c" stroke-width="31"/>
+  <circle cx="261" cy="234" r="146" stroke="url(#edge)" stroke-width="31"/>
+  <path d="M365 322L480 420" stroke="url(#handle)" stroke-width="33" stroke-linecap="round"/>
+  <path d="M378 321L486 414" stroke="#b5eab0" stroke-opacity=".55" stroke-width="2" stroke-linecap="round"/>
+  <circle cx="261" cy="220" r="147" fill="url(#glass)" stroke="url(#metal)" stroke-width="26"/>
+  <circle cx="261" cy="220" r="159" stroke="#b5f5b1" stroke-opacity=".35" stroke-width="1"/>
+  <circle cx="261" cy="220" r="134" stroke="#8fcfa0" stroke-opacity=".28" stroke-width="1.5"/>
+  <path d="M128 140A152 152 0 0 1 306 75" stroke="#e1ffd6" stroke-opacity=".65" stroke-width="2" stroke-linecap="round"/>
+  <path d="M142 83L261 220L386 83" stroke="#131d17" stroke-width="12" stroke-linecap="round"/>
+  <path d="M142 78L261 216L386 78" stroke="url(#connection)" stroke-width="7" stroke-linecap="round"/>
+  <circle cx="142" cy="80" r="22" fill="#293a2e"/><circle cx="142" cy="75" r="22" fill="url(#white)"/>
+  <circle cx="386" cy="80" r="22" fill="#293a2e"/><circle cx="386" cy="75" r="22" fill="url(#white)"/>
+  <circle cx="261" cy="220" r="68" fill="url(#red-glow)"/>
+  <circle cx="261" cy="226" r="28" fill="#431513"/><circle cx="261" cy="218" r="28" fill="url(#red)"/>
+  <path d="M244 202Q253 192 266 196" stroke="#ffd2b8" stroke-opacity=".55" stroke-width="2" stroke-linecap="round"/>
+</svg>
