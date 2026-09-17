@@ -87,10 +87,24 @@ def find_similar_failures(
                 "category": fp.get("category") or "",
                 "failed_at_tool": fp.get("failed_tool"),
                 "fix": fp.get("cached_fix") or "",
+                # Similarity does not verify this newly generated suggestion.
+                "fix_status": "unverified",
+                "developer_fix_outcome": _fix_outcome(run),
                 "started_at": run.get("started_at") or "",
             }
         )
     return results
+
+
+def _fix_outcome(run: dict[str, Any]) -> dict[str, Any] | None:
+    """Keep a manual outcome tied to the exact fix the developer tried."""
+    metadata = run.get('metadata')
+    feedback = metadata.get('fix_feedback') if isinstance(metadata, dict) else None
+    if not isinstance(feedback, dict) or feedback.get('status') not in ('helpful', 'resolved', 'did_not_resolve'):
+        return None
+    if not all(isinstance(feedback.get(k), str) and feedback[k].strip() for k in ('fix', 'recorded_at', 'source')):
+        return None
+    return {k: feedback[k] for k in ('status', 'fix', 'recorded_at', 'source')}
 
 
 def build_failure_library(runs_dir: Path) -> list[dict[str, Any]]:

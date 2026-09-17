@@ -53,9 +53,15 @@ def print_evaluation(report: dict[str, Any]) -> None:
     print(f"Negative/control execution statuses (not correctness claims): {report['control_statuses']}")
     print(f"Fixture cases: {report['fixture_cases']}")
     print(f"Fixture accuracy: {report['fixture_accuracy']:.0%}")
-    print(f"Real-world cases: {report['real_world_cases']}")
-    print(f"Real-world scored cases: {report['real_world_scored_cases']}")
-    print(f"Real-world accuracy: {report['real_world_accuracy']:.0%}" if report['real_world_scored_cases'] else "Real-world accuracy: unmeasured (no scored cases)")
+    print(f"Saved cases: {report['real_world_cases']} (folder name does not establish external provenance)")
+    print(f"Saved scored cases: {report['real_world_scored_cases']}")
+    for population, counts in report['populations'].items():
+        print(f"{population}: {counts['total']} cases; correct={counts['correct']}, partial={counts['partial']}, "
+              f"wrong={counts['wrong']}, abstained={counts['abstained']}, errors={counts['errors']}, unscored={counts['unscored']}")
+        denominator = counts['high_confidence']
+        rate = f"{counts['high_confidence_wrong'] / denominator:.0%}" if denominator else 'unmeasured'
+        print(f"  High-confidence correct: {counts['high_confidence_correct']}/{denominator}; "
+              f"confident-wrong: {counts['high_confidence_wrong']}/{denominator} ({rate})")
     print(f"Low-confidence rate: {report['low_confidence_rate']:.0%} ({report['low_confidence_cases']}/{report['diagnosed_cases']} returned diagnoses)")
     print(f"Average runtime: {report['average_latency_ms']:.2f} ms")
     print(f"Most failed category: {report['most_failed_category']}")
@@ -70,12 +76,12 @@ def print_evaluation(report: dict[str, Any]) -> None:
         print(f"- {category}: {accuracy:.0%}")
     if report["real_world_accuracy_by_category"]:
         print()
-        print("Real-world accuracy by category:")
+        print("Saved-case label matches by category (not user accuracy):")
         for category, accuracy in sorted(report["real_world_accuracy_by_category"].items()):
             print(f"- {category}: {accuracy:.0%}")
     if report["unscored_real_world_cases"]:
         print()
-        print("Unscored real-world cases:")
+        print("Unscored saved cases:")
         for case in report["unscored_real_world_cases"]:
             print(f"- {case}")
     for result in report["results"]:
@@ -98,12 +104,22 @@ def _evaluate_directory(
             "run_id": path.stem, "expected_category": None, "expected_step": None,
             "actual_category": None, "actual_step": None, "confidence": None,
             "scored": False, "correct": False,
+            "population": "regression" if source != "real_world" else "unclassified",
         }
         started = time.perf_counter()
         try:
             run = read_run(path)
             row["run_id"] = str(run.get("run_id") or path.stem)
             row["execution_status"] = run.get("status", "unknown")
+            if source == 'real_world':
+                provenance = run.get('evaluation_population')
+                expected_path = path.parent / 'expected_diagnosis.json'
+                if provenance is None and expected_path.exists():
+                    provenance = (_load_json(expected_path) or {}).get('evaluation_population')
+                if provenance is not None:
+                    if provenance not in ('regression', 'internal_natural', 'external_developer'):
+                        raise ValueError('Invalid evaluation_population in run or expectation')
+                    row['population'] = provenance
             category, step = _expected_for(run, expected.get(row["run_id"]), path.parent / "expected_diagnosis.json")
             row.update(expected_category=category, expected_step=step, scored=category is not None)
             row["provider_group"] = '/'.join(sorted({str(s.get('provider')) for s in run['spans'] if s.get('provider')})) or 'unspecified'
@@ -152,6 +168,10 @@ def _summarize(results: list[dict[str, Any]]) -> dict[str, Any]:
 
     return {
         "results": results,
+        "populations": {
+            population: _trust_metrics([r for r in results if r.get('population', 'unclassified') == population])
+            for population in ('regression', 'internal_natural', 'external_developer', 'unclassified')
+        },
         "provider_breakdown": provider_breakdown,
         "control_statuses": control_statuses,
         "diagnosed_cases": len(diagnosed),
@@ -192,6 +212,31 @@ def _summarize(results: list[dict[str, Any]]) -> dict[str, Any]:
             for result in results
             if result["source"] == "real_world" and not result["scored"]
         ],
+    }
+
+
+def _trust_metrics(rows: list[dict[str, Any]]) -> dict[str, int]:
+    """Mutually exclusive scored outcomes; an expected abstention stays abstained.
+
+    Partial means category matched but original step did not. This is not a
+    judgment of usefulness. Provenance/outcomes require independent human review.
+    """
+    judged = [r for r in rows if r['scored'] and not r.get('error')]
+    diagnosed = [r for r in judged if r['actual_category'] not in (None, 'unknown')]
+    high = [r for r in diagnosed if r['confidence'] is not None and r['confidence'] >= .8]
+    return {
+        'total': len(rows),
+        'failure_cases': sum(r['expected_category'] not in (None, 'unknown') for r in rows),
+        'correct': sum(bool(r['correct']) for r in diagnosed),
+        'partial': sum(not r['correct'] and r['actual_category'] == r['expected_category'] for r in diagnosed),
+        'wrong': sum(r['actual_category'] != r['expected_category'] for r in diagnosed),
+        'abstained': sum(r['actual_category'] == 'unknown' for r in judged),
+        'correct_abstentions': sum(r['actual_category'] == 'unknown' and r['correct'] for r in judged),
+        'errors': sum(bool(r.get('error')) for r in rows),
+        'unscored': sum(not r['scored'] for r in rows),
+        'high_confidence': len(high),
+        'high_confidence_correct': sum(bool(r['correct']) for r in high),
+        'high_confidence_wrong': sum(not r['correct'] for r in high),
     }
 
 

@@ -7,7 +7,7 @@ from agentlens_engine.diagnose import diagnose_run
 
 
 class RemoteOptIn(unittest.TestCase):
-    def test_redacted_request_bounded_retry_and_grounded_fix_preserved(self):
+    def test_quote_only_legacy_proposal_is_rejected_after_bounded_retry(self):
         run = {'status': 'error', 'spans': [{'type': 'llm_call', 'input_messages': [{'role': 'user', 'content': 'email alex@example.com token=private'}], 'tools': [{'name': 'wrong'}, {'name': 'correct'}]}, {'type': 'tool_call', 'tool_name': 'wrong', 'output': {'error': 'Use correct'}}]}
         result = {'root_cause_category': 'tool_selection', 'confidence': .8, 'failed_at_step': 2, 'failed_at_tool': 'wrong', 'explanation': 'Tool error directs operation to correct', 'fix': 'Change the selected function from wrong to correct at this call site.', 'secondary_issues': [], 'evidence': [{'step': 2, 'field': 'output', 'quote': 'Use correct'}]}
         client = MagicMock()
@@ -15,8 +15,9 @@ class RemoteOptIn(unittest.TestCase):
         client.chat.completions.create.side_effect = [SimpleNamespace(choices=[SimpleNamespace(message=SimpleNamespace(content='not json'))]), SimpleNamespace(choices=[SimpleNamespace(message=SimpleNamespace(content=json.dumps(result)))])]
         with patch('openai.OpenAI', return_value=client) as constructor:
             diagnosis = diagnose_run(run, provider='openai')
-        self.assertEqual(diagnosis['diagnosis_source'], 'llm')
-        self.assertEqual(diagnosis['fix'], result['fix'])
+        self.assertEqual(diagnosis['diagnosis_source'], 'heuristic')
+        self.assertEqual(diagnosis['root_cause_category'], 'unknown')
+        self.assertEqual(diagnosis['fix'], '')
         self.assertEqual(client.chat.completions.create.call_count, 2)
         self.assertEqual(constructor.call_args.kwargs['max_retries'], 0)
         self.assertEqual(constructor.call_args.kwargs['timeout'].connect, 3)

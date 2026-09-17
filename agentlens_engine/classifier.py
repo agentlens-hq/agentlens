@@ -26,7 +26,14 @@ and evidence (list of {step, field, quote}, exact quotes from diagnostic_steps).
 Never infer failure from topic words, tool names, routine retries or preprocessing
 warnings. Prefer unknown with confidence 0 and no invented causes. Identify the
 upstream cause, not its downstream symptoms. Every asserted failure requires
-trace evidence; do not invent tools, steps, intentions, or facts.'''
+trace evidence; do not invent tools, steps, intentions, or facts.
+The request contains trace and supported_diagnosis. You may propose only that
+structurally supported diagnosis: copy its category, original step/tool,
+explanation, suggested fix, secondary issues and evidence exactly. Do not add
+interpretations, paraphrase, infer intentions or claim the fix was verified.
+You may lower its confidence, never increase it. If you cannot support the
+candidate, return unknown with confidence 0; local validation decides fallback.
+This restricted contract does not allow new causes beyond the local rules.'''
 
 
 def build_user_prompt(compact_run: dict[str, Any]) -> str:
@@ -38,6 +45,10 @@ def parse_diagnosis(raw: str) -> dict[str, Any]:
 
 
 def validate_diagnosis(value: Any, compact: dict[str, Any] | None = None) -> list[str]:
+    """Check schema and citation location, NOT causal support or prose entailment.
+
+    Remote acceptance additionally requires the gate in diagnose.py.
+    """
     if not isinstance(value, dict):
         return ['diagnosis must be an object']
     errors = []
@@ -132,6 +143,7 @@ def _tool_selection(run):
             continue
         output = step['output']
         error = _text(output.get('error', '')) if isinstance(output, dict) else str(output)
+        matches = []
         for other in tools:
             if other == step.get('tool_name'):
                 continue
@@ -143,14 +155,27 @@ def _tool_selection(run):
             redirect = re.search(r'(?i)\b(?:use|call)\s+' + name, error)
             expected = output.get('expected_tool') if isinstance(output, dict) else None
             if exclusive or wrong_tool and redirect or expected == other:
-                result = _candidate('tool_selection', step, f"Step {step['step']} called '{step.get('tool_name')}', but the tool error explicitly identifies '{other}' as the required tool; no successful retry of the original call is recorded.")
-                result['suggested_tool'] = other
-                yield result
-                break
+                matches.append(other)
+        # Tool declaration order cannot resolve contradictory routing evidence.
+        if len(matches) == 1:
+            other = matches[0]
+            result = _candidate('tool_selection', step, f"Step {step['step']} called '{step.get('tool_name')}', but the tool error explicitly identifies '{other}' as the required tool; no successful retry of the original call is recorded.")
+            result['suggested_tool'] = other
+            yield result
 
 
 def _has_terminal_failure(run):
-    return run.get('status') in ('error', 'failed', 'failure') and any(s.get('type') == 'error' for s in run['diagnostic_steps'])
+    if run.get('status') not in ('error', 'failed', 'failure'):
+        return False
+    errors = [s['step'] for s in run['diagnostic_steps'] if s.get('type') == 'error']
+    if not errors:
+        return False
+    # The collector retains historical errors after recovery. A later model
+    # response means that error is not demonstrated to be the terminal outcome.
+    # This does not certify the later answer; it abstains without terminal proof.
+    return not any(s.get('type') == 'llm_call' and s['step'] > max(errors)
+                   and s.get('status') not in ('error', 'failed', 'cancelled')
+                   for s in run['diagnostic_steps'])
 
 
 def _loop(run):

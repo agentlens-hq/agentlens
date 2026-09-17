@@ -79,7 +79,7 @@ class DiagnosisSourceTests(unittest.TestCase):
 
         self.assertEqual(diagnosis["diagnosis_source"], "heuristic")
 
-    def test_llm_source_is_set_when_llm_diagnosis_validates(self) -> None:
+    def test_quote_only_legacy_diagnosis_now_falls_back(self) -> None:
         llm_diagnosis = {
             "root_cause_category": "tool_selection",
             "confidence": 0.9,
@@ -94,7 +94,8 @@ class DiagnosisSourceTests(unittest.TestCase):
         with patch("agentlens_engine.diagnose._diagnose_with_llm", return_value=llm_diagnosis):
             diagnosis = diagnose_run({"run_id": "llm", "spans": [{'type': 'tool_call', 'tool_name': 'search_web', 'output': 'wrong tool'}]}, provider='openai')
 
-        self.assertEqual(diagnosis["diagnosis_source"], "llm")
+        self.assertEqual(diagnosis["diagnosis_source"], "heuristic")
+        self.assertEqual(diagnosis['root_cause_category'], 'unknown')
 
 
 class RunIdLookupTests(TempCwdTestCase):

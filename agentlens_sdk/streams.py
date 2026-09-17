@@ -102,6 +102,16 @@ class Stream:
                 status = 'error' if result['status'] == 'failed' else 'partial'
                 if status == 'error':
                     error = RuntimeError(str(result.get('error') or 'Provider response failed'))
+            if status == 'completed':
+                if self.accumulator.provider == 'anthropic':
+                    terminal = bool(result.get('stop_reason'))
+                elif self.accumulator.api == 'responses':
+                    terminal = result.get('status') == 'completed'
+                else:
+                    choices = result.get('choices') or []
+                    terminal = bool(choices) and all(c.get('finish_reason') for c in choices)
+                if not terminal:
+                    status = 'partial'  # EOF alone is not a provider completion event.
             self.finish(result, status, error)
 
     def __iter__(self):

@@ -1,4 +1,5 @@
 {
+  "evaluation_population": "regression",
   "root_cause_category": "tool_selection",
   "failed_at_step": 2,
   "failed_at_tool": "search_tickets",
