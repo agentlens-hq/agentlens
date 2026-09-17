@@ -24,8 +24,8 @@ def main() -> None:
         python = binaries / 'python'
         cli = binaries / 'agentlens'
         env = {key: value for key, value in os.environ.items() if key not in ('PYTHONPATH', 'PYTHONHOME', 'OPENAI_API_KEY', 'ANTHROPIC_API_KEY')}
-        def command(args):
-            result = subprocess.run([str(a) for a in args], cwd=root, env=env, text=True, capture_output=True, check=True, timeout=90)
+        def command(args, input_text=None):
+            result = subprocess.run([str(a) for a in args], cwd=root, env=env, text=True, input=input_text, capture_output=True, check=True, timeout=90)
             print(result.stdout, end='')
             return result.stdout
         command([python, '-m', 'pip', 'install', '--no-deps', wheel])
@@ -41,6 +41,8 @@ def main() -> None:
         run_id = next((root / '.agentlens/runs').glob('*.json')).stem
         for args in [['runs', 'show', run_id], ['diagnose', run_id], ['anonymize', run_id], ['feedback-template', run_id]]:
             command([cli, *args])
+        replay = command([cli, 'runs', 'replay', run_id], '\nf\nb\nq\n')
+        assert 'full current span' in replay and 'span_id' in replay
         print(f'ARTIFACT PASS: Python {sys.version.split()[0]}, {wheel.name}, {len(fixtures)} packaged cases')
 
 

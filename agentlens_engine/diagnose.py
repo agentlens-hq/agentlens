@@ -31,16 +31,14 @@ def diagnose_run(run_json: dict[str, Any], use_llm: bool = False, *, provider: s
     run = normalize_run(run_json)
     compact = preprocess_run(run['spans'], run)
     remote = _diagnose_with_llm(compact, provider, timeout) if provider else None
-    if remote is not None and validate_diagnosis(remote, compact):
-        remote = None
-    diagnosis = remote if remote is not None else classify_from_evidence(compact)
+    remote = _verify_remote_diagnosis(remote, compact) if remote is not None else None
+    diagnosis = remote if remote is not None else _supported_diagnosis(compact)
     diagnosis['diagnosis_source'] = 'llm' if remote is not None else 'heuristic'
     diagnosis.setdefault('evidence_strength', 'uncalibrated' if remote is not None else 'insufficient')
     diagnosis['confidence_note'] = 'Evidence-strength score, not a calibrated probability.'
+    diagnosis['fix_status'] = 'unverified'
     if provider and remote is None:
-        diagnosis['remote_warning'] = 'Remote diagnosis failed or lacked grounded evidence; local rules were used.'
-    if remote is None:
-        diagnosis['fix'] = generate_fix(diagnosis['root_cause_category'], compact, diagnosis)
+        diagnosis['remote_warning'] = 'Remote diagnosis failed or did not match structurally supported claims; local rules were used.'
     diagnosis['hallucinations'] = detect_hallucinations(run['spans'], compact.get('tool_definitions') or [])
     diagnosis['impact'] = compute_impact(run['spans'], diagnosis)
     if diagnosis['root_cause_category'] == 'unknown' or diagnosis['confidence'] < .6:
@@ -53,8 +51,38 @@ def diagnose_run(run_json: dict[str, Any], use_llm: bool = False, *, provider: s
     return diagnosis
 
 
+def _supported_diagnosis(compact: dict[str, Any]) -> dict[str, Any]:
+    """One source of category predicates, origin ordering, facts and suggestions."""
+    result = classify_from_evidence(compact)
+    result['fix'] = generate_fix(result['root_cause_category'], compact, result)
+    return result
+
+
+def _verify_remote_diagnosis(value: Any, compact: dict[str, Any]) -> dict[str, Any] | None:
+    """Fail closed: quotes alone cannot authorize model-authored causal prose.
+
+    Recompute from the trace, not a candidate echoed back by the provider. Match
+    the redacted representation the provider actually saw, then return only local
+    facts/templates. Exact text is intentional: arbitrary paraphrase entailment
+    is outside this narrow contract. Extra model metadata is never propagated.
+    """
+    if validate_diagnosis(value, anonymize(compact)):
+        return None
+    supported = _supported_diagnosis(compact)
+    public = anonymize(supported)
+    fields = ('root_cause_category', 'failed_at_step', 'failed_at_tool',
+              'explanation', 'fix', 'secondary_issues', 'evidence')
+    if any(value.get(field) != public[field] for field in fields):
+        return None
+    if value['confidence'] > supported['confidence']:
+        return None
+    supported['confidence'] = value['confidence']
+    supported['remote_validation'] = 'Matched local structural rules and approved explanation/fix templates.'
+    return supported
+
+
 def _diagnose_with_llm(compact: dict[str, Any], provider: str, timeout: float) -> dict[str, Any] | None:
-    cleaned = anonymize(compact)
+    cleaned = anonymize({'trace': compact, 'supported_diagnosis': _supported_diagnosis(compact)})
     if residual(cleaned):
         return None
     prompt = build_user_prompt(cleaned)
@@ -86,11 +114,11 @@ def _diagnose_with_llm(compact: dict[str, Any], provider: str, timeout: float) -
                     raw = text_content(response.model_dump().get('content'))
                 try:
                     diagnosis = parse_diagnosis(raw or '')
-                    if not validate_diagnosis(diagnosis, cleaned):
+                    if _verify_remote_diagnosis(diagnosis, compact) is not None:
                         return diagnosis
                 except (TypeError, ValueError):
                     pass
-                prompt += '\nReturn valid JSON with exact evidence quotes and original step references.'
+                prompt += '\nReturn valid JSON matching supported_diagnosis exactly; do not add claims or increase confidence.'
     except Exception:
         return None
     return None

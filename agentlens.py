@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Any
 
 from agentlens_core.privacy import anonymize, residual
+from agentlens_core.state import format_state_diff
 from agentlens_core.storage import atomic_write, safe_path
 from agentlens_sdk import (
     AgentLensClient,
@@ -328,14 +329,14 @@ def _print_diagnosis(run_id: str, provider: str | None = None) -> None:
     print("ROOT CAUSE:")
     print(f"  {diagnosis['root_cause_category']}")
     print()
-    print("FAILED AT:")
+    print("FAILED AT (ROOT-CAUSE STEP):")
     tool = diagnosis.get("failed_at_tool") or "unknown tool"
     print(f"  Step {diagnosis['failed_at_step']} ({tool})")
     print()
     print("WHY:")
     print(f"  {diagnosis['explanation']}")
     print()
-    print("FIX:")
+    print("SUGGESTED FIX (not verified):")
     print(f"  {diagnosis['fix']}")
     print()
     print("SECONDARY:")
@@ -362,7 +363,7 @@ def _print_diagnosis(run_id: str, provider: str | None = None) -> None:
     hallucinations = diagnosis.get("hallucinations") or []
     if hallucinations:
         print()
-        print("HALLUCINATIONS DETECTED:")
+        print("SCHEMA / EXPLICIT CONTRADICTION FINDINGS:")
         for h in hallucinations:
             sev = h.get("severity", "?").upper()
             print(f"  [{sev}] {h.get('detail', '')}")
@@ -458,6 +459,22 @@ def _print_feedback_template(run_id: str) -> None:
     run_id = item.get("run_id", run_id)
     print(f"# AgentLens Feedback: {run_id}")
     print()
+    print("## Independent ground truth (complete BEFORE diagnose, runs show, or runs view)")
+    print()
+    print("- Source: regression / internal_natural / external_developer")
+    print("- Recorded at:")
+    print("- Observed behavior:")
+    print("- Expected category / original step (unknown is allowed):")
+    print("- Expected explanation / fix:")
+    print("- Had you already seen AgentLens's answer? Yes / No:")
+    print()
+    print("## AgentLens result (complete AFTER ground truth is recorded)")
+    print()
+    print("- Category / original step:")
+    print("- Source / confidence score:")
+    print("- Category correct / step correct:")
+    print("- Confidence believable / confident-wrong:")
+    print()
     print("## What broke?")
     print()
     print("- ")
@@ -475,6 +492,7 @@ def _print_feedback_template(run_id: str) -> None:
     print("## Did the suggested fix work?")
     print()
     print("- Yes / No / Not tried:")
+    print("- Fix helpful / issue resolved (separate answers):")
     print("- Notes:")
     print()
     print("## What was confusing?")
@@ -613,7 +631,11 @@ def _print_similar(run_id: str, top_n: int = 5) -> None:
         if started:
             print(f"     When: {started} UTC")
         if match.get("fix"):
-            print(f"     Fix used: {match['fix'][:120]}{'…' if len(match['fix']) > 120 else ''}")
+            print(f"     Suggested fix (unverified): {match['fix'][:120]}{'…' if len(match['fix']) > 120 else ''}")
+        outcome = match.get('developer_fix_outcome')
+        if outcome:
+            print(f"     Developer-reported outcome: {outcome['status']} ({outcome['recorded_at']})")
+            print(f"     Change actually tried: {outcome['fix']}")
         print()
 
 
@@ -750,7 +772,7 @@ def _usage_counts(usage: Any) -> tuple[int, int, int]:
 
 
 def _replay_run(run_id: str) -> None:
-    """Interactive step-by-step replay of a run. Press ENTER to advance."""
+    """Inspect recorded spans; never execute an agent or provider request."""
     item = _load_run_or_report(run_id)
     if item is None:
         return
@@ -764,15 +786,40 @@ def _replay_run(run_id: str) -> None:
     print("=" * 60)
     print(f"  {len(spans)} span(s)  ·  status: {item.get('status', '?')}")
     print()
-    print("Press ENTER to advance through each span. Ctrl+C to quit.")
+    print("ENTER: next / finish; b: back; f: full current span; d: state diff; q: quit.")
 
-    for i, span in enumerate(spans, start=1):
-        original_step = span.get("original_index", i)
+    cursor = -1
+    while True:
         try:
-            input(f"\n[Press ENTER for step {original_step} (span {i}/{len(spans)})]")
+            command = input("\n[Replay command] ").strip().lower()
         except (KeyboardInterrupt, EOFError):
             print("\nReplay stopped.")
             return
+        if command == 'q':
+            return
+        if command in ('f', 'd'):
+            if cursor < 0:
+                print('Advance to a span first.')
+            elif command == 'f':
+                print(json.dumps(spans[cursor], indent=2, ensure_ascii=True))
+            else:
+                snapshots = [s for s in spans[:cursor + 1] if s.get('type') == 'memory_snapshot' and 'state' in s]
+                if len(snapshots) < 2:
+                    print('Two recorded state snapshots are required for comparison.')
+                else:
+                    print(format_state_diff(snapshots[-2]['state'], snapshots[-1]['state']))
+            continue
+        if command == 'b':
+            cursor = max(0, cursor - 1)
+        elif command in ('', 'n'):
+            cursor += 1
+            if cursor == len(spans):
+                break
+        else:
+            print('Use ENTER, b, f, d, or q.')
+            continue
+        i, span = cursor + 1, spans[cursor]
+        original_step = span.get('original_index', i)
 
         stype = span.get("type", "unknown")
         print(f"\n{'━' * 60}")

@@ -20,6 +20,10 @@ AgentLens helps you follow the recorded evidence back to a specific step and
 a concrete change to test. When the trace cannot support a cause, it reports
 **insufficient evidence** rather than pretending certainty.
 
+Beta support boundaries and current blockers are documented in the
+[Modules 1-2 support contract](docs/module12_support.md) and
+[beta completion report](docs/module12_beta_report.md).
+
 - **Capture:** record supported model calls, tool selections/results, usage, and errors.
 - **Inspect:** read the run in your terminal or open its local HTML timeline.
 - **Diagnose:** get a category, original failed step, evidence, suggested fix, and confidence/source label.
@@ -107,6 +111,12 @@ agentlens.record_tool_result(
 Use a new provider call ID for each retry. Re-recording an existing ID updates
 that result, including a legitimate `None` output.
 
+Memory capture is explicit: `record_memory_snapshot(label, state)` copies JSON-like
+state at your chosen boundary. Replay uses ENTER to advance, `b` to go back, `f`
+for full captured span JSON and `d` to compare the latest two recorded snapshots.
+Diffs show added/removed/changed fields; lists are compared as whole values.
+Display truncation does not change comparison semantics. Replay never reruns an agent.
+
 </details>
 
 ## Inspect and Diagnose
@@ -145,12 +155,12 @@ SOURCE:
   Heuristic fallback
 ROOT CAUSE:
   tool_selection
-FAILED AT:
+FAILED AT (ROOT-CAUSE STEP):
   Step 2 (search_web)
 WHY:
   Step 2 called 'search_web', but the tool error explicitly identifies
   'query_db' as the required tool; no successful retry is recorded.
-FIX:
+SUGGESTED FIX (not verified):
   Route this operation to 'query_db', distinguish the tool descriptions,
   and add a routing regression test.
 EVIDENCE STRENGTH: observed
@@ -232,6 +242,14 @@ These are transport timeouts, not a hard total wall-clock deadline.
 Provider failures or invalid evidence fall back to local rules and are labeled.
 No provider is selected merely because a key exists.
 
+**Restricted remote contract:** a model proposal must match the cause, original
+step, evidence and explanation/fix templates independently produced by the local
+structural rules. New claims, paraphrases, unrelated quotes and higher confidence
+are rejected with labeled heuristic fallback (or insufficient evidence). Accepted
+LLM proposals do not expand diagnosis coverage beyond those rules. Fixes remain
+unverified suggestions; confidence is not a calibrated probability. Live-provider
+and independent developer validation are still outstanding; see the beta report.
+
 `anonymize` and `upload prepare` use the same best-effort credential/PII policy
 as server ingestion. Review exports manually: proprietary facts, arbitrary names,
 encoded secrets and unknown credential formats cannot be guaranteed removed.
@@ -258,6 +276,12 @@ The checkout also has 2 developer-operated OSS validation cases, not customer
 traces. The command reports raw category/step matches, false positives/negatives,
 abstentions and runtime. These small regression counts do not estimate accuracy
 on unseen users. No zero-false-positive or live-provider benchmark is claimed.
+
+Evaluation now separates `regression`, `internal_natural`, `external_developer`
+and `unclassified` populations. Confident-wrong uses the existing 0.80 threshold
+with an explicit numerator/denominator; a wrong original step counts as wrong for
+that metric. Independent review instructions are in the
+[case template](real_world_cases/CASE_TEMPLATE.md).
 
 **What we are working on now:** validating whether diagnoses help developers debug
 real broken agents faster. The next evidence we need is user-confirmed correctness,

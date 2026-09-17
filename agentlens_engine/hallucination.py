@@ -35,13 +35,9 @@ def detect_hallucinations(
         }
     """
     spans = normalize_run({"spans": spans})["spans"]
-    schema_map = _build_schema_map(tool_definitions or [])
-    # Also try to extract schemas from llm_call span tool lists
-    for span in spans:
-        if not isinstance(span, dict):
-            continue
-        if span.get("type") == "llm_call" and span.get("tools"):
-            schema_map.update(_build_schema_map(span["tools"]))
+    # Do not apply a later schema revision retroactively to earlier calls.
+    has_recorded_schemas = any(s.get('type') == 'llm_call' and s.get('tools') for s in spans)
+    schema_map = {} if has_recorded_schemas else _build_schema_map(tool_definitions or [])
 
     events: list[dict[str, Any]] = []
     tool_outputs: list[dict[str, Any]] = []  # accumulate for contradiction checks
@@ -51,6 +47,9 @@ def detect_hallucinations(
             continue
         i = span.get("original_index", i)
         stype = span.get("type")
+
+        if stype == 'llm_call' and span.get('tools'):
+            schema_map.update(_build_schema_map(span['tools']))
 
         if stype == "tool_call":
             tool_name = span.get("tool_name") or ""
