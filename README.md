@@ -1,13 +1,43 @@
-# AgentLens
+<p align="center">
+  <img src="website/agentlens-mark.svg" alt="AgentLens logo: a green lens around a red failure node" width="88" height="88">
+</p>
 
-Local Python trace capture and evidence-based diagnosis for agent failures.
-AgentLens reports an original trace step, the supporting evidence, and a suggested
-fix when a rule can support them. Otherwise it reports **insufficient evidence**.
+<h1 align="center">AgentLens</h1>
+
+<p align="center"><strong>Find the decision that broke your agent.</strong><br>
+Local trace capture and evidence-based root-cause debugging.</p>
+
+<p align="center">
+  <a href="https://agentlens.run/">Website</a> ·
+  <a href="#install-and-try">Quickstart</a> ·
+  <a href="#verified-capture-scope">Supported providers</a> ·
+  <a href="contribution.md">Contribute</a> ·
+  <a href="https://github.com/agentlens-hq/agentlens/issues">Report a bug</a>
+</p>
+
+Your agent picked the wrong tool, repeated a failed call, or lost its goal.
+AgentLens helps you follow the recorded evidence back to a specific step and
+a concrete change to test. When the trace cannot support a cause, it reports
+**insufficient evidence** rather than pretending certainty.
+
+- **Capture:** record supported model calls, tool selections/results, usage, and errors.
+- **Inspect:** read the run in your terminal or open its local HTML timeline.
+- **Diagnose:** get a category, original failed step, evidence, suggested fix, and confidence/source label.
+
+![Illustrated offline demo: step 1 selects search_web, step 2 returns an error directing the lookup to query_db, and step 3 records the error. AgentLens identifies tool_selection at step 2 and suggests routing the lookup to query_db.](docs/assets/diagnosis-overview.svg)
+
+*Illustration of the deterministic offline demo, not a dashboard screenshot or
+customer run. See the [text output](#inspect-and-diagnose) or run
+`agentlens demo --no-browser` to reproduce it.*
+
+**Local by default · Python 3.9+ · Open source / [MIT](LICENSE) · Beta**
 
 ## Install and Try
 
-This checkout prepares version **0.1.3**; it has not been published by this repair.
-The published `pip install runlens` release may not contain these changes.
+Start with the current source for beta testing. This checkout is **0.1.3**;
+[PyPI](https://pypi.org/project/runlens/) lists **0.1.2** as of September 16, 2026.
+`pip install runlens` installs the published release, not necessarily the behavior
+documented here. The Python package is named `runlens`; the import and CLI are `agentlens`.
 
 ```bash
 git clone https://github.com/agentlens-hq/agentlens.git
@@ -22,8 +52,9 @@ agentlens demo --no-browser
 On Windows, activate with `.venv\Scripts\activate` instead. Use the activated
 environment's CLI; a global `agentlens` command may belong to an older install.
 
-The demo simulates a broken agent locally and never calls a provider, even when
-API keys are set. Doctor checks local mechanics, not real-world diagnosis quality.
+The demo captures a simulated broken agent, saves its trace, and prints a diagnosis.
+It never calls a provider, even when API keys are set. No API key or account is
+needed for this demo. Doctor checks local mechanics, not real-world diagnosis quality.
 
 ## Capture a Run
 
@@ -47,6 +78,13 @@ def support_agent(query):
 support_agent("Find the status of customer C17.")
 ```
 
+This is an instrumentation example, not a complete customer lookup agent. Your own
+OpenAI call requires `OPENAI_API_KEY` and provider access. Keep your existing model
+configuration. For provider-specific examples, see [examples/](examples/).
+
+<details>
+<summary>Run lifecycle, async capture, and tool results</summary>
+
 `async def` decorators and async provider clients are supported. Await child
 tasks before the decorated function exits. Independent decorated agents get
 separate run IDs; nested decorators create child runs. Detached background tasks
@@ -69,14 +107,22 @@ agentlens.record_tool_result(
 Use a new provider call ID for each retry. Re-recording an existing ID updates
 that result, including a legitimate `None` output.
 
+</details>
+
 ## Inspect and Diagnose
 
 ```bash
 agentlens runs list
 agentlens runs show <run_id>
 agentlens diagnose <run_id>                    # Offline, even with API keys set
+agentlens runs view <run_id>                   # Opens a local HTML timeline
+```
+
+<details>
+<summary>More CLI commands</summary>
+
+```bash
 agentlens runs prompt <run_id> --step 2        # Original trace step, not LLM-call ordinal
-agentlens runs view <run_id>                   # Local HTML; prints path if browser unavailable
 agentlens runs replay <run_id>
 agentlens runs stitch <run_id>
 agentlens watch                               # Changed saved snapshots, not live event streaming
@@ -88,6 +134,10 @@ agentlens feedback-template <run_id>
 agentlens evaluate
 ```
 
+If no browser is available, `runs view` prints the generated HTML path instead.
+
+</details>
+
 Example from the deterministic demo, abbreviated:
 
 ```text
@@ -98,9 +148,11 @@ ROOT CAUSE:
 FAILED AT:
   Step 2 (search_web)
 WHY:
-  Step 2 called 'search_web', whose error explicitly directs this operation to 'query_db'.
+  Step 2 called 'search_web', but the tool error explicitly identifies
+  'query_db' as the required tool; no successful retry is recorded.
 FIX:
-  Route this operation to 'query_db' as the error requests; distinguish its supported operation.
+  Route this operation to 'query_db', distinguish the tool descriptions,
+  and add a routing regression test.
 EVIDENCE STRENGTH: observed
 Confidence score (not a calibrated probability): 0.85
 ```
@@ -119,6 +171,17 @@ certification. Hallucination checks cover constrained schema violations and
 explicit same-entity field contradictions; they do not verify arbitrary facts.
 
 ## Verified Capture Scope
+
+| Integration | Current scope |
+| --- | --- |
+| OpenAI / Python | Chat Completions and Responses; sync/async calls and supported streams |
+| Anthropic / Python | Messages; sync/async calls and supported streams |
+| LangGraph / Python | Patch before compilation; aggregate invoke and scoped updates-mode node capture |
+| [Node SDK](agentlens_sdk_ts/README.md) | Awaited non-streaming OpenAI Chat and Anthropic Messages; not Python parity |
+| CrewAI, AutoGen, PydanticAI | Conditional capture through supported provider methods, not verified native integrations |
+
+<details>
+<summary>Tested versions and integration boundaries</summary>
 
 Python protocol tests use real SDKs with local HTTP transports, not paid calls:
 OpenAI 2.41.0 (Chat Completions and Responses) and Anthropic 0.107.0 (Messages),
@@ -142,6 +205,8 @@ No universal CrewAI/AutoGen/PydanticAI or arbitrary raw-API interception is clai
 The Node package in `agentlens_sdk_ts/` supports awaited non-streaming OpenAI Chat
 and Anthropic Messages calls. Its narrower support is **not Python parity**.
 See its README for build and protocol limitations.
+
+</details>
 
 ## Privacy and Remote Diagnosis
 
@@ -194,11 +259,33 @@ traces. The command reports raw category/step matches, false positives/negatives
 abstentions and runtime. These small regression counts do not estimate accuracy
 on unseen users. No zero-false-positive or live-provider benchmark is claimed.
 
+**What we are working on now:** validating whether diagnoses help developers debug
+real broken agents faster. The next evidence we need is user-confirmed correctness,
+useful fixes, and repeat use, not more features or larger synthetic scores.
+
 Real external users, confirmed usefulness and payment intent remain unverified.
-Stay in Phase 3; regression success alone is not evidence of product-market fit.
+Regression success alone is not evidence of real-world accuracy or product-market fit.
 For case format and verification commands see [release verification](docs/release_verification.md).
+
+### Help Test a Real Failure
+
+Run AgentLens on a broken agent, then prepare feedback locally:
+
+```bash
+agentlens anonymize <run_id>
+agentlens feedback-template <run_id>
+```
+
+Review the export manually before sharing anything. Tell us whether the failed step
+was right, the explanation made sense, the fix helped, and you would use it again.
+A sanitized description or synthetic reproduction is enough to start an
+[issue](https://github.com/agentlens-hq/agentlens/issues); do not post raw traces or secrets.
 
 ## Contributing
 
 See [contribution.md](contribution.md) for setup, testing, pull request rules,
 privacy and security reporting, community expectations, and licensing.
+
+## License
+
+AgentLens is available under the [MIT License](LICENSE).

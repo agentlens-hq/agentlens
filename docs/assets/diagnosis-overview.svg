@@ -1,0 +1,51 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1080" height="560" viewBox="0 0 1080 560" role="img" aria-labelledby="title description">
+  <title id="title">From a failed agent run to a concrete fix</title>
+  <desc id="description">Illustrated offline AgentLens demo. Step one selects search_web. Step two returns an error saying customer records are only available in query_db. Step three records the error. The heuristic diagnosis identifies tool selection at step two with an evidence score of 0.85 and recommends query_db. This is a simulated example, not customer data or a product screenshot.</desc>
+  <rect x="1" y="1" width="1078" height="558" rx="16" fill="#ffffff" stroke="#d4ded7" stroke-width="2"/>
+  <g font-family="'IBM Plex Sans', 'Helvetica Neue', sans-serif" fill="#18231c">
+    <text x="36" y="42" font-family="'JetBrains Mono', monospace" font-size="12" fill="#526258" letter-spacing="1.6">AGENTLENS / FROM TRACE TO FIX</text>
+    <text x="36" y="87" font-size="32" font-weight="600">The error is a clue. Follow it upstream.</text>
+    <path d="M36 112H1044" stroke="#d4ded7"/>
+
+    <text x="36" y="147" font-size="13" font-weight="600" fill="#526258" letter-spacing="1">CAPTURED RUN</text>
+    <text x="36" y="182" font-size="18">Find a customer's renewal status</text>
+    <text x="36" y="208" font-size="18">using local records.</text>
+
+    <path d="M59 249V386" stroke="#b5c7ba" stroke-width="2"/>
+    <circle cx="59" cy="251" r="17" fill="#edf7ef" stroke="#83b38c"/>
+    <text x="59" y="257" text-anchor="middle" font-size="15" fill="#287a40">1</text>
+    <text x="89" y="248" font-family="'JetBrains Mono', monospace" font-size="18">llm_call</text>
+    <text x="89" y="273" font-size="16" fill="#526258">Selects search_web.</text>
+
+    <rect x="36" y="293" width="406" height="62" rx="5" fill="#fff2ef"/>
+    <circle cx="59" cy="321" r="17" fill="#ffffff" stroke="#a33225" stroke-width="2"/>
+    <text x="59" y="327" text-anchor="middle" font-size="15" fill="#a33225">2</text>
+    <text x="89" y="317" font-family="'JetBrains Mono', monospace" font-size="18" fill="#a33225">search_web</text>
+    <text x="89" y="343" font-size="16" fill="#a33225">Error names query_db as the source.</text>
+
+    <circle cx="59" cy="386" r="17" fill="#ffffff" stroke="#819989"/>
+    <text x="59" y="392" text-anchor="middle" font-size="15" fill="#526258">3</text>
+    <text x="89" y="383" font-family="'JetBrains Mono', monospace" font-size="18">error</text>
+    <text x="89" y="408" font-size="16" fill="#526258">Failure recorded in the local trace.</text>
+
+    <path d="M472 321H506M499 314L506 321L499 328" fill="none" stroke="#287a40" stroke-width="2"/>
+    <path d="M528 136V470" stroke="#d4ded7"/>
+    <text x="556" y="147" font-size="13" font-weight="600" fill="#526258" letter-spacing="1">DIAGNOSIS / HEURISTIC</text>
+    <text x="556" y="188" font-size="31" font-weight="600">Tool selection.</text>
+    <text x="556" y="220" font-family="'JetBrains Mono', monospace" font-size="16" fill="#a33225">FAILED AT  Step 2 / search_web</text>
+
+    <text x="556" y="263" font-size="12" font-weight="600" fill="#526258" letter-spacing="1">EVIDENCE</text>
+    <path d="M557 277V328" stroke="#a33225" stroke-width="2"/>
+    <text x="574" y="295" font-size="20">Customer records are only available</text>
+    <text x="574" y="322" font-size="20">in query_db.</text>
+
+    <text x="556" y="366" font-size="12" font-weight="600" fill="#287a40" letter-spacing="1">CHANGE TO TEST</text>
+    <text x="556" y="396" font-size="19">Route this lookup to query_db.</text>
+    <text x="556" y="423" font-size="19">Clarify descriptions; add a routing test.</text>
+    <text x="556" y="464" font-size="15" fill="#526258">Score 0.85 / observed evidence, not probability.</text>
+
+    <path d="M36 491H1044" stroke="#d4ded7"/>
+    <text x="36" y="531" font-family="'JetBrains Mono', monospace" font-size="15" fill="#287a40">$ agentlens demo --no-browser</text>
+    <text x="1044" y="531" text-anchor="end" font-size="13" fill="#526258">Illustrated offline demo. No customer data.</text>
+  </g>
+</svg>
