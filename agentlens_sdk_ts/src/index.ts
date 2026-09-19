@@ -159,15 +159,39 @@ function saveRun(runData: Run): void {
       fs.fsyncSync(fd);
     } finally { fs.closeSync(fd); }
     fs.renameSync(temporary, filePath);
-  } catch (error) {
-    process.emitWarning('Trace persistence failed: ' + String(error));
+  } catch {
+    process.emitWarning('Trace persistence failed; agent result is unchanged.');
   } finally {
     try {
       if (temporary && fs.existsSync(temporary)) fs.unlinkSync(temporary);
-    } catch (error) {
-      process.emitWarning('Trace temporary-file cleanup failed: ' + String(error));
+    } catch {
+      process.emitWarning('Trace temporary-file cleanup failed.');
     }
   }
+}
+
+function safeError(error: unknown): string {
+  const data = error as {status?: unknown};
+  const status = data?.status;
+  const message = String(error);
+  // Node has no PII engine. Fail closed on credential-bearing exceptions rather
+  // than partially masking provider text and accidentally retaining a key hint.
+  if (status === 401 || status === 403 || /sk-|bearer|authorization|credentials?|password|secret|api[ _-]*key|(?:access|session|auth)[ _-]*token|(?:^|[\W_])token(?:["'\s]*[:=]|[ _-]*(?:hint|prefix|suffix|last4))|key[ _-]*(?:hint|prefix|suffix|ending|ends|starts|starting|begins)/i.test(message)) {
+    const http = typeof status === 'number' && Number.isInteger(status) && status >= 100 && status <= 599 ? `HTTP ${status}: ` : '';
+    return http + 'Request failed. Credential-bearing error details omitted. [REDACTED]';
+  }
+  return message;
+}
+
+function errorMetadata(error: unknown): Record<string, unknown> {
+  const data = error as {status?: unknown; request_id?: unknown; requestID?: unknown};
+  const name = error instanceof Error ? error.constructor.name : 'Error';
+  const known = ['Error', 'APIError', 'AuthenticationError', 'PermissionDeniedError', 'BadRequestError', 'RateLimitError', 'NotFoundError'];
+  const metadata: Record<string, unknown> = {error_type: known.includes(name) ? name : 'Error'};
+  if (typeof data?.status === 'number' && Number.isInteger(data.status) && data.status >= 100 && data.status <= 599) metadata.status_code = data.status;
+  const requestId = data?.request_id ?? data?.requestID;
+  if (typeof requestId === 'string' && /^req_[A-Za-z0-9_-]{1,200}$/.test(requestId) && safeError(requestId) === requestId) metadata.request_id = requestId;
+  return metadata;
 }
 
 // ── Public API ───────────────────────────────────────────────────────────────
@@ -222,8 +246,8 @@ export async function run<T>(
       return result;
     } catch (err) {
       runData.status = err instanceof Error && err.name === 'AbortError' ? 'cancelled' : 'error';
-      runData.error = String(err);
-      appendSpan({ type: 'error', ts: nowIso(), error: String(err), context: { function: name } });
+      runData.error = safeError(err);
+      appendSpan({ type: 'error', ts: nowIso(), error: safeError(err), ...errorMetadata(err), context: { function: name } });
       throw err;
     } finally {
       runData.ended_at = nowIso();
@@ -342,10 +366,11 @@ function patchResource(moduleName: string, className: string, provider: string):
         input_messages: request.messages ?? [], tools: request.tools ?? [], system: request.system,
         latency_ms: Date.now() - started, response_content: toJsonable(provider === 'anthropic' ? response?.content : response),
         usage: toJsonable(response?.usage), stop_reason: response?.stop_reason ?? response?.choices?.[0]?.finish_reason,
-        status: error ? 'error' : 'completed', error: error ? String(error) : null,
+        status: error ? 'error' : 'completed', error: error ? safeError(error) : null,
+        ...(error ? errorMetadata(error) : {}),
         cost_usd: computeCostUsd(request.model, response?.usage)});
       if (response) captureTools(response, provider);
-      if (error) appendSpan({type: 'error', ts: nowIso(), error: String(error), context: {provider, model: request.model}});
+      if (error) appendSpan({type: 'error', ts: nowIso(), error: safeError(error), ...errorMetadata(error), context: {provider, model: request.model}});
     });
     let promise: any;
     try { promise = original.call(this, params, ...options); }

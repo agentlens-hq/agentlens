@@ -97,3 +97,67 @@ test('parallel runs remain isolated and cancellation is retained', async () => {
   await assert.rejects(lens.run('cancelled', async () => { const e = new Error('aborted'); e.name = 'AbortError'; throw e; }));
   assert.equal(runs().find(r => r.name === 'cancelled').status, 'cancelled');
 });
+
+test('credential-bearing exceptions never reach persisted Node errors', async () => {
+  const cases = [
+    'Incorrect API key provided: sk-proj-FAKEHEAD****FAKETAIL.',
+    'sk-proj-SYNTHETIC_NOT_A_REAL_KEY',
+    'API key ending in FAKE_LAST_FOUR is invalid.',
+    'Credential hint: FAKE_HINT_VALUE',
+    'Bearer FAKE_BEARER_VALUE',
+    'Authorization: Basic FAKE_BASIC_VALUE',
+    'key ending in FAKE_LAST_FOUR',
+    'Bearer FAKEHEAD **** FAKETAIL',
+    JSON.stringify({error: {api_key_hint: 'FAKE_FIELD_HINT', token_last4: 'FAKE_LAST4', AWS_SECRET_ACCESS_KEY: 'FAKE_AWS_VALUE'}}),
+    JSON.stringify({error: {message: 'sk-FAKEHEAD...FAKETAIL', nested: {authorization: 'FAKE_NESTED_VALUE'}}}),
+  ];
+  for (const [i, message] of cases.entries()) {
+    const error = new Error(message);
+    await assert.rejects(lens.run('privacy_' + i, async () => { throw error; }), e => e === error);
+    const captured = runs().find(r => r.name === 'privacy_' + i);
+    assert.ok(!JSON.stringify(captured).includes('FAKE'));
+    assert.ok(!JSON.stringify(captured).includes('SYNTHETIC_NOT_A_REAL_KEY'));
+    assert.equal(captured.status, 'error');
+  }
+  await assert.rejects(lens.run('ordinary_error', async () => { throw new Error('Disk is full; retry later.'); }));
+  assert.equal(runs().find(r => r.name === 'ordinary_error').error, 'Error: Disk is full; retry later.');
+  await assert.rejects(lens.run('ordinary_tokens', async () => { throw new Error('Token limit exceeded; retry later.'); }));
+  assert.equal(runs().find(r => r.name === 'ordinary_tokens').error, 'Error: Token limit exceeded; retry later.');
+});
+
+test('local OpenAI authentication rejection omits opaque provider hints', async () => {
+  const client = new OpenAI({apiKey: 'synthetic-not-used', maxRetries: 0, fetch: async () =>
+    new Response(JSON.stringify({error: {message: 'FAKE_OPAQUE_MATERIAL', type: 'invalid_request_error', code: 'invalid_api_key'}}),
+      {status: 401, headers: {'content-type': 'application/json', 'x-request-id': 'req_synthetic_safe'}})});
+  await assert.rejects(lens.run('privacy_provider', async () => {
+    await client.chat.completions.create({model: 'test', messages: []});
+  }));
+  const captured = runs().find(r => r.name === 'privacy_provider');
+  assert.equal(captured.status, 'error');
+  assert.equal(captured.spans.filter(s => s.type === 'llm_call').length, 1);
+  assert.ok(!JSON.stringify(captured).includes('FAKE_OPAQUE_MATERIAL'));
+  assert.match(captured.error, /HTTP 401/);
+  assert.equal(captured.spans[0].status_code, 401);
+  assert.equal(captured.spans[0].error_type, 'AuthenticationError');
+  assert.equal(captured.spans[0].request_id, 'req_synthetic_safe');
+  const unsafeId = new Error('Authentication failed');
+  unsafeId.status = 401;
+  unsafeId.requestID = 'req_sk-proj-FAKE_REQUEST_ID_KEY';
+  await assert.rejects(lens.run('privacy_request_id', async () => { throw unsafeId; }));
+  assert.ok(!JSON.stringify(runs().find(r => r.name === 'privacy_request_id')).includes('FAKE_REQUEST_ID_KEY'));
+});
+
+test('persistence warnings omit credential-bearing filesystem errors', async () => {
+  const rename = fs.renameSync, warn = process.emitWarning;
+  const warnings = [];
+  try {
+    fs.renameSync = () => { throw new Error('Bearer FAKE_WARNING_MATERIAL'); };
+    process.emitWarning = message => warnings.push(message);
+    await lens.run('privacy_warning', async () => 123);
+    assert.equal(warnings.length, 1);
+    assert.ok(!warnings.join('\n').includes('FAKE_WARNING_MATERIAL'));
+  } finally {
+    fs.renameSync = rename;
+    process.emitWarning = warn;
+  }
+});
