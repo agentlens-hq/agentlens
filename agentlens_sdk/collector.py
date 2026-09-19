@@ -7,6 +7,7 @@ import contextvars
 import functools
 import inspect
 import json
+import re
 import threading
 import time
 import uuid
@@ -15,6 +16,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable, TypeVar, cast
 
+from agentlens_core.privacy import exception_message, redact_credentials
 from agentlens_core.storage import atomic_write, safe_path
 from agentlens_core.trace import read_run, tool_error
 
@@ -127,7 +129,7 @@ def run(name: str) -> Callable[[F], F]:
                         capture_error(exc, context={'function': func.__name__, 'cancelled': True})
                         raise
                     run_data["status"] = "error"
-                    run_data["error"] = str(exc)
+                    run_data["error"] = exception_message(exc)
                     capture_error(exc, context={"function": func.__name__})
                     raise
                 finally:
@@ -153,7 +155,7 @@ def run(name: str) -> Callable[[F], F]:
                     capture_error(exc, context={'function': func.__name__, 'cancelled': True})
                     raise
                 run_data["status"] = "error"
-                run_data["error"] = str(exc)
+                run_data["error"] = exception_message(exc)
                 capture_error(exc, context={"function": func.__name__})
                 raise
             finally:
@@ -223,12 +225,12 @@ def current_run() -> dict[str, Any]:
 
 def append_span(span: dict[str, Any]) -> dict[str, Any]:
     run_data = current_run()
-    enriched = {
+    enriched = redact_credentials({
         **span,
         "id": str(uuid.uuid4()),
         "run_id": run_data["run_id"],
         'original_index': len(run_data['spans']) + 1,
-    }
+    })
     enriched['span_id'] = enriched['id']
     run_data["spans"].append(enriched)
     return enriched
@@ -258,7 +260,7 @@ def _find_tool_span(tool_use_id: str | None) -> dict[str, Any] | None:
 def record_tool_result(
     tool_name: str, output: Any, input: Any | None = None, tool_use_id: str | None = None
 ) -> None:
-    output_json = _to_jsonable(output)
+    output_json = redact_credentials(_to_jsonable(output))
     existing = _find_tool_span(tool_use_id)
     if existing is not None:
         # Fill the result onto the request span the monkeypatch already recorded.
@@ -295,7 +297,8 @@ def record_tool_result(
 def save_run(path: str | None = None, run: dict[str, Any] | None = None) -> Path:
     run_data = run if run is not None else current_run()
     output_path = Path(path) if path else safe_path(RUNS_DIR, run_data['run_id'])
-    atomic_write(output_path, run_data)
+    # Also cover manual saves and fields mutated after initial span capture.
+    atomic_write(output_path, redact_credentials(run_data))
     return output_path
 
 
@@ -321,10 +324,22 @@ def capture_error(error: BaseException | str, context: Any, latency_ms: float | 
             "ts": _now_iso(),
             "step_index": len(current_run()["spans"]) + 1,
             "latency_ms": latency_ms,
-            "error": str(error),
+            "error": exception_message(error),
+            **_error_metadata(error),
             "context": _to_jsonable(context),
         }
     )
+
+
+def _error_metadata(error: BaseException | str) -> dict[str, Any]:
+    metadata: dict[str, Any] = {'error_type': type(error).__name__}
+    status = getattr(error, 'status_code', None)
+    if type(status) is int and 100 <= status <= 599:
+        metadata['status_code'] = status
+    request_id = getattr(error, 'request_id', None)
+    if isinstance(request_id, str) and re.fullmatch(r'req_[A-Za-z0-9_-]{1,200}', request_id):
+        metadata['request_id'] = request_id
+    return redact_credentials(metadata)
 
 
 def capture_tool_results_from_messages(messages: Any, provider: str) -> None:
@@ -524,7 +539,8 @@ def _begin_call(kwargs: dict[str, Any], provider: str):
                 'response_content': data.get('content') if provider == 'anthropic' else data,
                 'stop_reason': data.get('stop_reason') or data.get('status') or _first_choice_stop_reason(data),
                 'usage': usage, 'cost_usd': compute_cost_usd(kwargs.get('model'), usage),
-                'streaming': bool(kwargs.get('stream')), 'error': str(error) if error else None,
+                'streaming': bool(kwargs.get('stream')), 'error': exception_message(error) if error else None,
+                **(_error_metadata(error) if error else {}),
             })
             before = len(run_data['spans'])
             if provider == 'anthropic':

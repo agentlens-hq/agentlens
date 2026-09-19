@@ -6,6 +6,8 @@ import math
 from pathlib import Path
 from typing import Any, Literal, TypedDict
 
+from .privacy import redact_credentials
+
 ExecutionStatus = Literal['running', 'completed', 'failed', 'cancelled', 'partial', 'unknown']
 
 MAX_RUN_BYTES = 20 * 1024 * 1024
@@ -119,7 +121,8 @@ def normalized_tools(tools: Any) -> list[dict[str, Any]]:
 def normalize_run(value: Any, strict: bool = False) -> dict[str, Any]:
     if not isinstance(value, dict):
         raise ValueError('Run JSON must be an object.')
-    run = dict(value)
+    # Old/external traces must not re-expose credential echoes in CLI or RCA.
+    run = redact_credentials(value)
     raw = run.get('spans', [])
     if not isinstance(raw, list):
         if strict:

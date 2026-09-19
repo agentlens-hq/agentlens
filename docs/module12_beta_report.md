@@ -362,8 +362,8 @@ Staged: **false**. Committed: **false**. Pushed: **false**. Published: **false**
 Deployed: **false**. HEAD remains the baseline commit. Existing branch retained.
 No unrelated user edits existed at the start or were overwritten.
 
-`codex.md`, `.agentlens/`, `.env`, generated run JSON, anonymized JSON, cache files
-and egg-info remain ignored and unstaged. `codex.md` was not changed. Test run
+The private working log, `.agentlens/`, `.env`, generated run JSON, anonymized JSON, cache files
+and egg-info remain ignored and unstaged. The private working log was not changed. Test run
 artifacts were created in temporary directories; build metadata is ignored.
 
 ## 14. Remaining Risks
@@ -587,7 +587,7 @@ wheel replay smoke coverage, and updates README/support/report documentation.
 Modified tracked files: 15. Untracked files: 7 (including prior audit artifacts).
 Staged: none. New commits: none. Pushed: no. Published: no. Deployed: no.
 HEAD remains `59ce36159f09dd059d13dc7b0b4bba1ec87f840f`.
-`codex.md` was not modified. Private data, generated runs, caches and egg-info are
+The private working log was not modified. Private data, generated runs, caches and egg-info are
 ignored and not tracked/staged. Build/test output is local only.
 
 ### Current Verdict
@@ -630,7 +630,7 @@ staging; the stale live-validation document is the only additional file.
 | `docs/live_provider_validation.md` | Refresh stale blocked status and requested real-provider matrix | YES, documentation only |
 
 No raw/provider outputs, temporary traces, anonymized exports, cache files,
-egg-info, screenshots, local debug scripts, `codex.md`, `.env` or website files
+egg-info, screenshots, local debug scripts, the private working log, `.env` or website files
 belong in this commit. The credential-pattern scan of the 22 initial paths found
 only two references to a pre-existing fake key in the doctor anonymization test;
 manual inspection confirmed both are synthetic test constants, not new secrets.
@@ -676,3 +676,422 @@ No live result is inferred from mock transports or the engineered OSS cases.
 This change is a reviewable engineering-safety PR, not a beta release or a claim
 of real-user accuracy. There are no additional product implementation changes in
 this final classification pass.
+
+## Live OpenAI Provider Validation — Earlier Blocked Attempt
+
+Date: September 17, 2026.
+
+Preflight: BLOCKED. The presence-only check in the command execution environment
+returned `OPENAI_API_KEY available: False`. A key exported in another terminal
+is not evidence that this execution environment can access it. No credential was
+read from conversation history, copied, printed, persisted or modified.
+
+Commit: `33d219d8eab0b75c0678a744993ddd976c864575`.
+Working tree before this report update: clean.
+Models: none; no API requests were attempted.
+
+| Check | Result |
+| --- | --- |
+| Basic request | NOT TESTED: credential unavailable |
+| Responses API | NOT TESTED: credential unavailable; not a claim of unsupported integration |
+| Tool selection | NOT TESTED |
+| Tool result / automatic versus manual capture | NOT TESTED |
+| Async | NOT TESTED |
+| Streaming | NOT TESTED |
+| Interrupted stream | NOT TESTED |
+| Error handling | NOT TESTED |
+| Token capture | NOT TESTED |
+| Latency capture | NOT TESTED |
+| Trace persistence | NOT TESTED |
+| Credential leakage | NOT TESTED: full-key comparison requires the environment credential |
+| Diagnosis of live traces | NOT TESTED: no live trace generated |
+
+API calls made: 0. API cost for this attempt: $0.
+No live traces, exports, logs or validation scripts were generated. This report
+contains only preflight metadata and blocked results. No credential-leak PASS or
+NOT FOUND result is claimed without an actual comparison against the key.
+
+Regressions were not rerun because the live-validation stage could not start and
+no product code changed. Section 17 records the previous offline results; those
+are not new live-provider evidence.
+
+OPENAI LIVE VALIDATION: FAIL (preflight blocked, not an observed product failure).
+ANTHROPIC LIVE VALIDATION: UNVERIFIED; no Anthropic request attempted.
+MODULE 1 TECHNICAL READINESS: NOT READY for live-validated beta sign-off.
+MODULE 2 TECHNICAL READINESS: NOT READY for live-validated beta sign-off.
+These readiness labels reflect the unverified live gate, not a new code defect.
+EXTERNAL USER VALIDATION: 0 developers.
+
+Next action: make the credential available to the process executing validation,
+then repeat the presence-only check before any live request. Do not paste the
+credential into chat, a command submitted here, repository files or the report.
+Only this report was edited; no commit, push, publication, deployment or PR was
+performed for this attempt.
+
+## Live OpenAI Provider Validation
+
+Date: September 17, 2026. This authenticated attempt supersedes the earlier
+blocked attempt preserved above. Presence-only preflight: `OPENAI_API_KEY available: True`.
+Commit:
+`33d219d8eab0b75c0678a744993ddd976c864575`.
+Initial working tree: only `docs/module12_beta_report.md` modified, unstaged.
+Those prior report edits were preserved. No product code or test expectations changed.
+
+### Provider and request controls
+
+Real OpenAI SDK 2.41.0, explicit `https://api.openai.com/v1` endpoint,
+`max_retries=0`, 30-second inference timeout. A real model-list request confirmed
+project access to `gpt-5.4-nano`; completed responses identified
+`gpt-5.4-nano-2026-03-17`. Current model capabilities and pricing were checked in
+[official OpenAI documentation](https://developers.openai.com/api/docs/models/gpt-5.4-nano).
+Reasoning was disabled; each successful request allowed at most 64 output tokens.
+Only synthetic prompts and a harmless local weather function were used.
+
+Eight real inference requests: six completed requests, one intentionally
+interrupted stream, and one intentional invalid-model request. The tool workflow
+uses two of the six completed requests. HTTP observation recorded seven 200
+responses and one 404 from the real endpoint, with request-ID presence verified
+without copying header values into the report. One additional successful model-list
+request makes **9 requests that reached OpenAI**. An earlier model-list attempt
+failed at sandbox connectivity before the approved network retry. No inference
+was retried. No authentication-failure test or Anthropic request was made.
+
+### Results
+
+| Check | Result |
+| --- | --- |
+| Basic request | PASS |
+| Responses API | PASS |
+| Tool selection | PASS |
+| Tool result | PASS — AUTOMATIC from the subsequent request |
+| Async | PASS |
+| Streaming | PASS |
+| Interrupted stream | PASS |
+| Error handling | PASS |
+| Token capture | PASS when provider usage was received |
+| Latency | PASS |
+| Trace persistence | PASS |
+| Credential leakage | PASS |
+| Diagnosis | PASS — honest offline abstention on the real 404 run |
+
+Each row below was read from its saved JSON using the canonical trace reader;
+all span IDs were unique. Exports were prepared locally for all seven runs.
+
+| Case | Run ID | Saved status | LLM spans | Readable / exported |
+| --- | --- | --- | --- | --- |
+| basic | `ab37429d-affb-4944-a8c8-49570621f95b` | success | 1 | PASS |
+| responses | `2f0a1970-bf7e-4d89-84c6-beab39d3bb9a` | success | 1 | PASS |
+| tool | `cf71852c-1cbd-417b-aeef-e2035d9e19f9` | success | 2 | PASS |
+| async | `9bd62899-15eb-4ed3-84ef-03acec134888` | success | 1 | PASS |
+| streaming | `2dd5f647-0255-4a95-8ab1-ec4b04aefd58` | success | 1 | PASS |
+| interrupted | `55d3a717-0d60-4293-8eab-00ecf89b2e21` | partial | 1 | PASS |
+| error | `059777d2-bec2-4d11-824f-b3e4f3c35f44` | error | 1 | PASS |
+
+Basic request individual checks: real endpoint PASS; real response PASS; run
+creation PASS; LLM span PASS; provider PASS; model PASS; input PASS; output PASS;
+latency PASS; supplied token usage PASS; run status PASS; saved trace PASS.
+The returned and captured content was exactly `LIVE_OK`.
+
+Responses API individual checks: request capture PASS; response capture PASS;
+model PASS; input PASS; output PASS; usage PASS; latency PASS; run status PASS;
+saved trace PASS. The response text was exactly `LIVE_OK`.
+
+Tool workflow individual checks: schema PASS; model selection PASS; name PASS;
+arguments PASS; tool result PASS; subsequent response PASS; complete run PASS.
+The model selected `get_weather` under automatic tool choice and supplied
+`city=Chicago`. The local function returned synthetic temperature 72 and sunny
+conditions; the final response reflected those values. One tool span was
+completed when AgentLens inspected the tool-result message in the next real
+request. The validation workflow never called `record_tool_result()`.
+This is automatic result capture at the next-request boundary, not automatic
+local tool execution or tool-runtime measurement; standalone final results still
+have the documented manual-recording boundary.
+
+Async individual checks: run starts PASS; correct run membership PASS; span PASS;
+response PASS; usage PASS; latency PASS; coroutine creation does not save PASS;
+no saved trace before coroutine return PASS; persistence after execution PASS;
+final status PASS. The existing async run decorator was used.
+
+Streaming individual checks: starts PASS; chunk handling PASS; reconstructed
+`LIVE_OK` PASS; exactly one LLM span/no duplicates PASS; supplied usage PASS;
+latency PASS; final success status PASS; readable trace PASS. Five chunks were
+consumed. Interrupted-stream individual checks: first chunk consumed PASS;
+stopped before finish event PASS; explicit close inside the run PASS; span and
+run both `partial` PASS. No final usage arrived before interruption; absent usage
+was retained rather than invented. This does not validate abandoned/unclosed
+streams or hard process death.
+
+Safe error individual checks: expected SDK `NotFoundError`/404 PASS; no unexpected
+crash PASS; LLM error and error events captured PASS; error run status PASS;
+readable trace PASS; credentials absent PASS. There was one failed API request;
+multiple error events reflect SDK-call and enclosing-run capture, not retries.
+No response output or usage was supplied for this failed request.
+
+RCA trace inspection: model calls, synthetic inputs, outputs, applicable tool
+schema/selection/arguments/result, failure evidence, latency, provider-supplied
+usage, and run status were present. Observed LLM latencies ranged from about
+569 to 3010 ms, including the interrupted and failed requests.
+
+### Diagnosis and evidence boundary
+
+The current checkout CLI was invoked as `python agentlens.py diagnose <run_id>`
+on the genuine invalid-model run only, with no remote-provider flag. It executed
+successfully and returned `unknown`, step 0 (abstention sentinel), confidence 0,
+source `heuristic`, and insufficient-evidence wording. The actual failed LLM
+call is step 1; no positive causal category or root-cause step was asserted.
+Claimed-step and positive-causal-relationship checks are therefore NOT APPLICABLE,
+not a claim that a causal explanation was proven. Evidence validation returned
+no errors. An offline proposal-rejection probe against this unchanged real trace
+rejected an added unsupported loop explanation. It was not a live remote-model
+response. No healthy run was relabeled or diagnosed as a fabricated failure.
+The earlier remote-evidence regressions also passed in the full Python suite.
+
+### Credential checks
+
+The actual environment credential was compared internally against raw traces,
+logs, all seven locally prepared exports, reports, validation scripts, generated
+caches/build artifacts, and the isolated Node verification tree. No credential
+value or fragment was printed or written by the validation workflow.
+
+RAW TRACE KEY CHECK: NOT FOUND
+
+LOG KEY CHECK: NOT FOUND
+
+EXPORT KEY CHECK: NOT FOUND
+
+REPORT KEY CHECK: NOT FOUND
+
+TEMP ARTIFACT KEY CHECK: NOT FOUND
+
+Obvious authentication-header persistence: NOT FOUND in live raw traces.
+All live artifacts remain under ignored `.agentlens/`; the isolated Node tree
+is outside the repository. Nothing was staged or published.
+
+### Regression verification and environment caveats
+
+- Full Python suite: 113 passed; one upstream LangChain pending-deprecation warning.
+- Ruff: PASS using CI paths.
+- mypy: PASS, 24 source files using CI paths.
+- Current checkout doctor: PASS, all six checks.
+- Current checkout evaluate: PASS, 16/16 category and original-step matches,
+  8 diagnoses/8 abstentions, zero errors/false positives/false negatives,
+  zero confident-wrong out of eight high-confidence diagnoses.
+- The globally installed `agentlens` entry point resolves to a different Python
+  installation: its doctor reported no fixture cases and its evaluate counted
+  zero cases, despite exit status 0. These are not passing checks. Running
+  `python agentlens.py doctor` and `python agentlens.py evaluate` against this
+  checkout produced the valid passing results above. No global install changed.
+- Checkout `npm test`: TypeScript build and consumer checking passed, then the
+  test-file runner timed out after 30 seconds before its six subtests ran.
+  One fresh temporary copy with byte-identical source/tests/manifests/lockfile
+  passed offline `npm ci`, TypeScript build, consumer checks, and all six Node
+  tests (about 215 ms runner time). The checkout timeout remains an environment
+  caveat; no dependency version, source, or timeout was changed.
+
+Regression children ran without provider credentials. Mocked-provider regressions
+are offline evidence only and are not counted as live API requests.
+
+### Usage and verdict
+
+Observed supplied usage: 270 input tokens and 46 output tokens across the six
+completed requests. At documented standard rates of $0.20/M input and $1.25/M
+output tokens (zero cached input observed), their estimated cost is $0.0001115.
+The interrupted stream supplied no usage, so the total billed cost cannot be
+determined from these traces; this estimate excludes its unreported usage.
+No exact-billing claim is made.
+
+OPENAI LIVE VALIDATION: PASS within the tested Python OpenAI capture scope.
+
+ANTHROPIC LIVE VALIDATION: UNVERIFIED.
+
+MODULE 1 TECHNICAL READINESS: NOT READY for full multi-provider sign-off;
+OpenAI live validation now passes, but Anthropic live coverage remains unverified.
+
+MODULE 2 TECHNICAL READINESS: NOT READY for full multi-provider sign-off;
+offline evidence validation and live-error abstention pass, but this attempt does
+not establish live remote-model diagnosis or Anthropic behavior.
+
+EXTERNAL USER VALIDATION: 0 DEVELOPERS.
+
+Only this report changed among tracked files; its pre-existing edits remain.
+Staged: none. Committed: no. Pushed: no. Published: no. Deployed: no.
+The passing OpenAI result does not remove the documented capture limits or
+establish independent developer accuracy/usefulness.
+
+### Follow-up terminal attempt: authentication rejection
+
+Reviewed September 17, 2026 (America/Chicago). The user subsequently ran the
+private terminal harness. Its session timestamp is September 18, 2026 at
+02:14:49 UTC, or September 17 at 21:14:49 America/Chicago.
+
+This is a separate attempt from the successful `gpt-5.4-nano` matrix above.
+Do not merge their request counts, credentials, models or conclusions. The
+earlier saved results and inspection record corroborate that separate matrix;
+they do not make this later request successful.
+
+| Check | Follow-up result |
+| --- | --- |
+| Model requested | `gpt-4.1-mini`; no inference completed |
+| Basic request | FAIL: HTTP 401, provider error code `invalid_api_key` |
+| Requests attempted / HTTP responses | 1 / 1; stopped without retries |
+| Responses, tools/results, async, complete/partial streams | NOT TESTED after authentication rejection |
+| Intentional invalid-model test | NOT TESTED |
+| Automatic error capture | PASS: error run, one LLM span and two error events |
+| Trace metadata | Run grouping, provider, requested model, input, timestamps, latency and unique span IDs passed |
+| Output / tokens | No successful model output or usage; successful capture remains untested in this attempt |
+| Local diagnosis / CLI | PASS: abstained rather than inventing a supported causal category |
+| Credential privacy | STRICT GATE NOT PASSED: masked credential hint persisted in the raw provider error |
+
+The basic test's expected-success status check failed because the provider
+rejected authentication. The saved `error` status was appropriate. This is not
+evidence of a success-status capture bug or insufficient account quota. The
+available evidence does not establish why the credential was rejected.
+
+#### Privacy finding and audit limitation
+
+The harness reported `NOT FOUND` for its in-memory full-key comparison, contiguous
+12-character fragments and the last eight characters, and checked credential
+field names. However, a subsequent content inspection detected the provider's
+masked credential hint inside saved error text. No hint, fragment or raw error
+was displayed or copied into this report.
+
+Therefore `NOT FOUND` is only the result of those specific comparisons, not a
+PASS for the stricter no-credential-fragments requirement. A masked provider echo
+can evade those length-based checks and credential-field scanning when stored
+under `error`. Treat this as a privacy finding; do not share the raw error trace.
+No usable full-key disclosure is established by this review. The reviewer did
+not have the environment credential and did not independently rerun the full-key
+comparison. No product code was changed to conceal or fix this finding.
+
+#### Follow-up regressions and verdict
+
+The terminal harness saved exit-code-zero results for all five checks:
+
+- Python: 113 tests passed.
+- Ruff: all checks passed.
+- mypy: no issues in 24 source files.
+- Checkout doctor: healthy.
+- Checkout evaluate: fixture accuracy 100%, 8/16 abstentions and 0/8
+  confident-wrong scored high-confidence diagnoses. These are offline results,
+  not real-user accuracy.
+
+OPENAI LIVE VALIDATION FOR THIS ATTEMPT: FAIL/BLOCKED by authentication; remaining
+live matrix not run. The harness's aggregate `PARTIAL` label describes completed
+local checks, not successful authenticated inference.
+PRIVACY VERDICT FOR THIS ATTEMPT: strict no-fragments requirement not satisfied.
+ANTHROPIC LIVE VALIDATION: UNVERIFIED. EXTERNAL USER VALIDATION: 0 developers.
+Billing cost is not determinable from this rejected request's trace; no usage
+was returned. No further API requests were made during review.
+
+The earlier successful OpenAI matrix remains historical evidence. This follow-up
+does not grant a broader beta-readiness sign-off. Authentication needs resolving,
+and the raw-error privacy boundary needs an explicit decision before sharing
+these artifacts. Generated artifacts and the harness remain ignored. Only this
+report was edited during review; no product edits, commits, pushes or publication.
+
+## Authentication Error Privacy Repair (September 18, 2026)
+
+This section records an offline code repair, not another provider-validation
+attempt. All credentials in the new tests are synthetic. OpenAI API calls: 0.
+Anthropic API calls: 0. No network requests, credential access, credential
+rotation or dependency installation were needed.
+
+### Reproduction and capture path
+
+The initial synthetic suite reproduced seven failing tests before the repair.
+Provider exceptions pass through `_capture_sync` / `_capture_async` and the
+stream completion callback into `_begin_call.finish`. The exception text was
+copied into the LLM span, `capture_error` events and the enclosing sync/async
+`run` decorator's top-level error. `save_run` then passed the unsanitized run to
+`atomic_write`, including its temporary file. Export-time anonymization was too
+late to protect the raw trace, and its token pattern could redact only the first
+part of a masked value while leaving the suffix behind.
+
+The Node SDK had equivalent direct exception-string copies in its provider
+callback and enclosing run, plus filesystem exception text in warnings.
+
+### Repair and boundaries
+
+- `agentlens_core/privacy.py`: reuse one recursive redaction policy for capture,
+  anonymization and residual detection. Add masked/split/ellipsis credential
+  forms, labeled hints, hint fields and complete authentication-header handling.
+  Credential-only capture does not invoke optional NLP or scrub unrelated PII.
+  Harmless serialized JSON keeps its original spacing. Redaction is idempotent
+  on the covered cases and preserves token-count fields.
+- `agentlens_sdk/collector.py`: sanitize spans when appended, tool results when
+  updated, the top-level error and the entire snapshot before atomic persistence.
+  Known authentication/authorization exceptions omit opaque provider text rather
+  than relying on recognizing every possible hint. Preserve provider, model,
+  numeric HTTP status, error type, safe request-ID metadata and known error code.
+- `agentlens_core/trace.py`: sanitize legacy/external traces on normalization, so
+  CLI inspection and local/remote diagnosis preparation do not re-expose known
+  credential patterns. This does not rewrite the historical source files.
+- `agentlens_sdk_ts/src/index.ts`: omit authentication and credential-bearing
+  exception messages conservatively instead of adding a separate partial-masking
+  implementation. Preserve safe HTTP/type/request-ID metadata. Filesystem warnings
+  no longer echo exception payloads. Ordinary non-sensitive errors remain readable.
+- Regression coverage is in `tests/test_auth_error_privacy.py` and
+  `agentlens_sdk_ts/tests/package.cjs`; no existing assertions were weakened.
+
+| Boundary | Evidence |
+| --- | --- |
+| Raw saved JSON | PASS: actual SDK/decorator persistence, manual snapshots and nested error/context fields |
+| In-memory error spans | PASS: credentials removed before save |
+| Sync/async/stream exception paths | PASS: synthetic failures and local SDK transports |
+| Authentication metadata | PASS: HTTP status, exception type and safe request ID retained |
+| `runs show` | PASS: captured stdout/stderr contain no tested sensitive fragments |
+| Anonymized JSON | PASS: saved output checked, not just terminal rendering |
+| Upload preparation | PASS: local exported JSON checked; nothing uploaded |
+| Diagnosis input | PASS: normalized/preprocessed input and intercepted remote adapter input checked without a remote call |
+| AgentLens-controlled warnings | PASS: persistence failures do not echo credential-bearing exception text |
+| Ordinary errors / metrics | PASS: readable error details and token counts preserved |
+
+The Python corpus includes 15 credential-message variants: complete synthetic
+keys, masking, ellipses, spaced masks, partial hints, prefixes/suffixes, bearer
+values, Basic/Digest headers, nested/escaped error representations and hint
+fields. Additional typed 401/403 tests use opaque synthetic material that cannot
+be identified by credential-pattern matching. The original exception still
+propagates unchanged to the application; only AgentLens's captured representation
+is sanitized. Node checks inspect the actual JSON written by its SDK as well.
+
+### Verification
+
+- Full Python suite: **125 passed**, one existing upstream LangChain warning.
+- Focused privacy/security, remote-evidence/opt-in and provider suites: **44 passed**.
+- Ruff using CI paths: PASS.
+- mypy using CI paths: PASS, 24 source files.
+- Current checkout doctor: healthy, all six checks passed.
+- Current checkout evaluation: 16/16 category/original-step matches, 8/16
+  abstentions, zero errors/false positives/false negatives, 0/8 confident-wrong.
+- Node: TypeScript build and consumer type checks PASS; **9/9 tests passed**
+  directly in the checkout using installed dependencies and local fetch stubs.
+- Git whitespace check: PASS. Generated runs, caches, build outputs and private
+  files remain ignored and unstaged.
+
+### Live evidence and remaining limits
+
+PREVIOUS SUCCESSFUL OPENAI LIVE VALIDATION: **PRESERVED**. The existing successful
+matrix and its inspection record have identical SHA-256 hashes before and after
+this repair. That successful attempt is not replaced by the **LATER INVALID-KEY
+ATTEMPT**, which remains a separate authentication rejection and the origin of
+the privacy finding. No fresh live test is needed to establish this synthetic
+repair, and none was made. Anthropic live validation remains unverified; external
+developer validation remains zero.
+
+Historical raw traces are not retroactively rewritten or certified safe. Keep
+the earlier rejected-request trace private; use the repaired reader/export path
+and review output before sharing. Outside typed authentication exceptions,
+redaction remains recognition-based, not a universal guarantee for arbitrary
+unlabeled secrets, custom encodings or malicious provider formats. Node's
+credential-bearing error omission is intentionally more conservative than Python
+text redaction and may retain less explanatory detail. Application logging,
+original rethrown exceptions, provider/SDK debug logging and external logging
+systems are outside AgentLens's controlled-output guarantee.
+
+PRIVACY BUG: **FIXED for the identified capture paths and covered adversarial cases**.
+RELEASE IMPACT: **RESOLVED for this privacy blocker**, not a blanket product or
+multi-provider beta sign-off. No observed tested credential fragment survives in
+newly captured AgentLens artifacts. Existing historical files still require care.
+
+The pre-existing report edits were preserved. Source/test/report changes are local
+and unstaged. Committed: no. Pushed: no. Published: no. Deployed: no.
