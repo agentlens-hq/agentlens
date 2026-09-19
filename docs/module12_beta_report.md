@@ -362,8 +362,8 @@ Staged: **false**. Committed: **false**. Pushed: **false**. Published: **false**
 Deployed: **false**. HEAD remains the baseline commit. Existing branch retained.
 No unrelated user edits existed at the start or were overwritten.
 
-`codex.md`, `.agentlens/`, `.env`, generated run JSON, anonymized JSON, cache files
-and egg-info remain ignored and unstaged. `codex.md` was not changed. Test run
+The private working log, `.agentlens/`, `.env`, generated run JSON, anonymized JSON, cache files
+and egg-info remain ignored and unstaged. The private working log was not changed. Test run
 artifacts were created in temporary directories; build metadata is ignored.
 
 ## 14. Remaining Risks
@@ -587,7 +587,7 @@ wheel replay smoke coverage, and updates README/support/report documentation.
 Modified tracked files: 15. Untracked files: 7 (including prior audit artifacts).
 Staged: none. New commits: none. Pushed: no. Published: no. Deployed: no.
 HEAD remains `59ce36159f09dd059d13dc7b0b4bba1ec87f840f`.
-`codex.md` was not modified. Private data, generated runs, caches and egg-info are
+The private working log was not modified. Private data, generated runs, caches and egg-info are
 ignored and not tracked/staged. Build/test output is local only.
 
 ### Current Verdict
@@ -630,7 +630,7 @@ staging; the stale live-validation document is the only additional file.
 | `docs/live_provider_validation.md` | Refresh stale blocked status and requested real-provider matrix | YES, documentation only |
 
 No raw/provider outputs, temporary traces, anonymized exports, cache files,
-egg-info, screenshots, local debug scripts, `codex.md`, `.env` or website files
+egg-info, screenshots, local debug scripts, the private working log, `.env` or website files
 belong in this commit. The credential-pattern scan of the 22 initial paths found
 only two references to a pre-existing fake key in the doctor anonymization test;
 manual inspection confirmed both are synthetic test constants, not new secrets.
@@ -686,7 +686,6 @@ returned `OPENAI_API_KEY available: False`. A key exported in another terminal
 is not evidence that this execution environment can access it. No credential was
 read from conversation history, copied, printed, persisted or modified.
 
-Branch: `codex/module12-beta-safety`.
 Commit: `33d219d8eab0b75c0678a744993ddd976c864575`.
 Working tree before this report update: clean.
 Models: none; no API requests were attempted.
@@ -733,7 +732,7 @@ performed for this attempt.
 
 Date: September 17, 2026. This authenticated attempt supersedes the earlier
 blocked attempt preserved above. Presence-only preflight: `OPENAI_API_KEY available: True`.
-Branch: `codex/module12-beta-safety`; commit:
+Commit:
 `33d219d8eab0b75c0678a744993ddd976c864575`.
 Initial working tree: only `docs/module12_beta_report.md` modified, unstaged.
 Those prior report edits were preserved. No product code or test expectations changed.
