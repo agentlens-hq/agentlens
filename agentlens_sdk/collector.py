@@ -436,6 +436,8 @@ def capture_openai_tool_calls(response: Any) -> None:
         if _find_tool_span(tool_call.get('id')) is not None:
             continue
         function = tool_call.get("function", {}) if isinstance(tool_call, dict) else {}
+        if not isinstance(function, dict):
+            continue
         append_span(
             {
                 "type": "tool_call",
@@ -520,7 +522,32 @@ def _call_context(kwargs: dict[str, Any], provider: str) -> dict[str, Any]:
     return result
 
 
-def _begin_call(kwargs: dict[str, Any], provider: str):
+def _response_status(data: dict[str, Any], provider: str, api: str) -> tuple[str, BaseException | None]:
+    """SDKs may return HTTP-200 failures or accept malformed response bodies."""
+    if api == 'responses':
+        status = data.get('status')
+        if status == 'failed':
+            return 'error', RuntimeError(str(data.get('error') or 'Provider response failed'))
+        if status in ('incomplete', 'in_progress', 'queued', 'cancelled'):
+            return 'partial', None
+        valid = status == 'completed' and isinstance(data.get('output'), list)
+    elif provider == 'anthropic':
+        content = data.get('content')
+        valid = isinstance(content, list) and all(isinstance(block, dict) for block in content)
+    else:
+        choices = data.get('choices')
+        valid = isinstance(choices, list) and bool(choices) and all(
+            isinstance(choice, dict) and isinstance(choice.get('message'), dict)
+            for choice in choices
+        )
+    if provider == 'openai' and any(not isinstance(call.get('function'), dict) for call in _find_tool_calls(data)):
+        valid = False
+    if not valid or data.get('usage') is not None and not isinstance(data['usage'], dict):
+        return 'error', ValueError('Malformed provider response: expected response fields are missing or invalid.')
+    return 'completed', None
+
+
+def _begin_call(kwargs: dict[str, Any], provider: str, api: str = 'messages'):
     capture_tool_results_from_messages(kwargs.get('messages', kwargs.get('input', [])), provider)
     run_data = current_run()
     context = _call_context(kwargs, provider)
@@ -532,7 +559,9 @@ def _begin_call(kwargs: dict[str, Any], provider: str):
             data = _to_jsonable(response)
             if not isinstance(data, dict):
                 data = {}
-            usage = data.get('usage') or {}
+            if status == 'completed' and not kwargs.get('stream'):
+                status, error = _response_status(data, provider, api)
+            usage = data.get('usage') if isinstance(data.get('usage'), dict) else {}
             span = append_span({
                 **context, 'type': 'llm_call', 'ts': ts, 'ended_at': _now_iso(),
                 'latency_ms': _elapsed_ms(started), 'status': status,
@@ -542,6 +571,8 @@ def _begin_call(kwargs: dict[str, Any], provider: str):
                 'streaming': bool(kwargs.get('stream')), 'error': exception_message(error) if error else None,
                 **(_error_metadata(error) if error else {}),
             })
+            if error:
+                capture_error(error, context=context, latency_ms=_elapsed_ms(started))
             before = len(run_data['spans'])
             if provider == 'anthropic':
                 capture_anthropic_tool_calls(data.get('content', []))
@@ -549,8 +580,6 @@ def _begin_call(kwargs: dict[str, Any], provider: str):
                 capture_openai_tool_calls(data)
             for tool_span in run_data['spans'][before:]:
                 tool_span['parent_span_id'] = span['span_id']
-            if error:
-                capture_error(error, context=context, latency_ms=_elapsed_ms(started))
         except Exception as exc:
             warnings.warn(f'Trace capture failed ({type(exc).__name__}); provider result is unchanged.', RuntimeWarning)
         finally:
@@ -560,7 +589,7 @@ def _begin_call(kwargs: dict[str, Any], provider: str):
 
 def _capture_sync(call: Callable, kwargs: dict[str, Any], provider: str, api: str):
     from .streams import Stream
-    finish = _begin_call(kwargs, provider)
+    finish = _begin_call(kwargs, provider, api)
     try:
         response = call()
     except BaseException as exc:
@@ -574,7 +603,7 @@ def _capture_sync(call: Callable, kwargs: dict[str, Any], provider: str, api: st
 
 async def _capture_async(call: Callable, kwargs: dict[str, Any], provider: str, api: str):
     from .streams import AsyncStream
-    finish = _begin_call(kwargs, provider)
+    finish = _begin_call(kwargs, provider, api)
     try:
         response = await call()
     except BaseException as exc:
@@ -746,7 +775,7 @@ def _find_tool_calls(value: Any) -> list[dict[str, Any]]:
 
 def _first_choice_stop_reason(response: Any) -> Any:
     choices = response.get('choices') if isinstance(response, dict) else None
-    return choices[0].get('finish_reason') if isinstance(choices, list) and choices else None
+    return choices[0].get('finish_reason') if isinstance(choices, list) and choices and isinstance(choices[0], dict) else None
 
 
 def _run_has_error_span(run_data: dict[str, Any]) -> bool:

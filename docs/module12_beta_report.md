@@ -1095,3 +1095,192 @@ newly captured AgentLens artifacts. Existing historical files still require care
 
 The pre-existing report edits were preserved. Source/test/report changes are local
 and unstaged. Committed: no. Pushed: no. Published: no. Deployed: no.
+
+## Controlled Boundary Regressions (September 19, 2026)
+
+This is **CONTROLLED BOUNDARY REGRESSIONS**, not **REAL-WORLD USER VALIDATION**.
+Baseline: branch `module12-beta-safety`, commit
+`5e6e3a3b8e88e47e7fb0ec317036df747da21cdc`, initially clean working tree.
+No provider calls, real credential inspection, commits, pushes, publication or
+deployment. Test commands remove both provider credential variables from their
+child environments. New probes use explicit synthetic credentials, SDK mock
+transports, temporary storage, forbidden socket connections and a forbidden
+remote-diagnosis adapter. No classifier or confidence threshold was changed.
+
+### Provider, execution and recovery matrix
+
+Ground truth was encoded in assertions before diagnosis. In every row below,
+expected RCA is **unknown / abstain**, actual RCA is **unknown**, confidence is
+**0.0**, failed-at step is **0**, and correct abstention is **YES**. These scores
+are evidence strength, not calibrated probabilities. HTTP errors preserve
+provider, exception type, HTTP status and safe request ID. Timeout/connection
+errors preserve exception type, message and nonnegative latency. Auth errors
+retain the existing credential-omission policy. All tested traces are readable.
+
+| Case | Number of distinct probes | Final execution result |
+| --- | ---: | --- |
+| HTTP 401, OpenAI and Anthropic | 2 | error |
+| HTTP 403, OpenAI and Anthropic | 2 | error |
+| HTTP 429, OpenAI and Anthropic | 2 | error |
+| HTTP 500, OpenAI and Anthropic | 2 | error |
+| HTTP 502, OpenAI and Anthropic | 2 | error |
+| HTTP 503, OpenAI and Anthropic | 2 | error |
+| Timeout, OpenAI and Anthropic | 2 | error |
+| Connection failure/reset, OpenAI and Anthropic | 2 | error |
+| HTTP 200 with missing response fields, both providers | 2 | error after repair |
+| Invalid choices element, invalid tool function, invalid usage, invalid Anthropic content element | 4 | error after repair |
+| OpenAI Responses `failed` / `incomplete` body | 2 | error / partial after repair |
+| OpenAI 429 then successful application retry | 1 | historical error retained; final call completed |
+| OpenAI timeout then successful application retry | 1 | historical error retained; final call completed |
+| Async cancellation, propagated / caught by application | 2 | cancelled / error; neither successful |
+| Cancellation while awaiting next streaming chunk | 1 | cancelled; partial answer retained |
+| Correct database tool raises DatabaseConnectionTimeout | 1 | error; correct arguments preserved |
+| Correct refund tool returns PermissionDenied / insufficient_scope | 1 | error; correct arguments preserved |
+
+**Infrastructure/execution probes: 31. False agent diagnoses: 0.
+High-confidence false agent diagnoses: 0. Correct abstentions: 31.**
+Confident-wrong rate across these controlled cases: **0/31 (0%)**. There were
+zero high-confidence RCA assertions, so conditional accuracy of confident
+diagnoses is **unmeasured**, not 100%. Reruns do not add cases to this denominator.
+Concurrency repetitions, schema/cascade controls and the separate evaluation
+corpus are excluded from this count. No real-user accuracy is inferred.
+
+429 retry text in an error message survives safely. Dedicated retry headers
+are not captured; see P2 limitations. SDK-internal retries are not individually
+observable through the outer `create` wrapper; these recovery probes exercise
+application-level retries. Recovered errors did not produce historical-failure
+RCA false positives. Existing execution status intentionally retains historical
+errors; it must not be read as proof of unrecovered agent failure.
+
+### Tool and concurrency boundaries
+
+- Correct selection plus database/permission failure: no wrong-tool diagnosis.
+  The database case really raises a local synthetic exception, records its tool
+  result, and propagates the exception through the decorated run.
+- Closed schema with `customer_id` plus unsupported `admin_override`: exactly
+  one `invented_param` finding, naming that argument and original step 2.
+  RCA category stays unknown; no broader hallucination/cause is fabricated.
+- Null customer ID consumed by a downstream tool that rejects the null:
+  cascade at original step 1. Control with a different customer ID and unrelated
+  database timeout: unknown. Existing fabricated-causality tests also pass.
+- Ten synchronized rounds of two decorated async agents: **20 unique runs**.
+  Each requests two tools; results return in reverse request order. Provider
+  tool IDs are deliberately reused across runs. All provider spans, arguments,
+  outputs, parent span IDs and run IDs stay isolated. A runs have one failed
+  tool and error status; B runs remain successful. All diagnoses abstain.
+- Existing nested parent/child/grandchild test passes, including a failing
+  child, successful sibling, successful continuing parent, running snapshot,
+  and readable stitched inspection. Existing incomplete/cyclic-child and
+  partial-stream regressions pass. No new hierarchy feature was introduced.
+
+### Large/weird data and privacy
+
+One 1 MiB unbroken tool result is fully persisted after the regex repair.
+CLI inspection and preprocessing stay below the test's 25,000-character bound;
+an independently recorded terminal timeout remains visible. Unicode, emoji,
+multiline/special characters, null, empty strings/lists and nested dictionaries
+serialize, inspect, anonymize and preprocess without crashing. Bytes are
+**not losslessly supported**: the existing encoder stores `<bytes>` explicitly.
+Per-field preprocessing truncation is not explicitly reported and can omit tail
+evidence; this is a known P2 gap, not a PASS for every large-trace requirement.
+
+The existing authentication-error privacy regressions pass unchanged: complete
+and masked synthetic credentials, partial hints, bearer material, authorization
+text, nested errors, typed auth errors and ordinary readable errors. Raw saved
+traces, CLI output, anonymized files, upload preparation, local/mocked-remote
+diagnosis input and AgentLens-controlled persistence warnings are checked.
+Token metrics remain intact. External SDK/application logging is not covered;
+regex redaction remains best effort, not universal PII/secret detection.
+
+Previous successful OpenAI validation is **PRESERVED**, distinct from the later
+invalid-key attempt. Its two summary-file SHA-256 hashes remain:
+
+- `results.json`: `461bcfb59e02b6e8925f8994a2b3e16d7d96ea5b1ddc97d9217723a8b449867d`
+- `inspection.json`: `795c8f14a62f589e14bbea1cb5823cb06c2371e772d9b9f0e754bed7e8daeb77`
+
+Only these summary hashes were checked; no historical credential-bearing trace
+was inspected or rewritten. Live Anthropic validation and real-user usefulness
+remain unverified. Provider API calls made for this pass: **0**.
+
+### Bugs reproduced and disposition
+
+**P1, repaired: false successful provider capture.**
+`agentlens_sdk/collector.py:525` (`_response_status`) and `:550` (`_begin_call`).
+Previously, any non-raising SDK return was finalized as completed, including
+HTTP-200 malformed data and Responses failed/incomplete bodies. Malformed tool
+function objects could also interrupt extraction before an error span existed.
+Minimal repair: validate basic response containers; respect Responses failure
+and partial status; safely record malformed-response errors before tool
+extraction; tolerate invalid choice/function objects without crashing. Original
+SDK return values/exceptions still pass through. Regressions for missing fields,
+four malformed field shapes and failed/incomplete Responses failed before and
+pass after the repair. This is not full validation of every provider schema.
+
+**P1, repaired: redaction stalls on ordinary long strings.**
+`agentlens_core/privacy.py:36` and `:42`, URL-credential and email patterns.
+Unanchored searches retried the same long token at every character, producing
+quadratic scanning. Both isolated patterns exceeded a three-second timeout on
+1 MiB; the original end-to-end run had to be terminated. Add token-start
+lookbehinds to avoid repeated suffix scans without disabling redaction. A
+15-second subprocess-bounded regression now checks capture redaction,
+anonymization and residual detection on the same 1 MiB string. Existing URL,
+email and credential-security regressions still pass.
+
+**P2, documented, not changed: silent per-field evidence truncation.**
+`agentlens_engine/preprocess.py:14` (`_bounded`) truncates a string to 1,000
+characters without a field-level marker; `preprocess_run` only warns about
+omitted spans/incomplete runs. A timeout message after 8,192 filler characters
+disappears from compact output, with `trace_warnings=[]`. The raw saved trace
+is intact. Future bounded truncation metadata should make this limitation
+visible; no classifier/threshold changes were made to hide it.
+
+**P2, documented, not changed: recovery-status ambiguity.**
+`agentlens_sdk/collector.py:305` (`_finalize_run`) treats any historical error
+span as run error, even after a successful application retry. RCA abstains
+correctly; the status is execution history, not confirmed current failure.
+A future explicit recovery model would be clearer; changing it is outside this
+focused P1 repair and must not erase historical errors.
+
+**P2, documented, not changed: retry headers absent.**
+`agentlens_sdk/collector.py:334` (`_error_metadata`) captures status/type/request
+ID, not `Retry-After` headers. Retry information in error text survives, but a
+header-only delay is lost. A future narrowly allowlisted retry-delay field
+would preserve it safely; do not capture arbitrary response headers.
+
+P3: no new issue identified. One initial concurrency test assertion was fixed
+because `read_run` normalizes missing parent IDs to an empty string; there was
+no product isolation bug. This was not a relaxation of span/ID/result checks.
+
+### Verification and exit decision
+
+- Python full suite: **138 passed**; one existing LangChain deprecation warning.
+- New boundary file: **13 tests**, with subcases/repetitions described above.
+- Focused privacy, security, remote-evidence, fabricated-causality, recovery and
+  provider regressions: **53 passed**, included in the full suite.
+- Ruff: PASS. Mypy: PASS, 24 source files.
+- Doctor: healthy, all six checks PASS.
+- Evaluation: 16/16 category/original-step matches; 8 abstentions; zero
+  false positives, false negatives or errors; all six positive fixtures pass.
+- Node: 9/9 tests PASS; TypeScript build and consumer type checks PASS.
+- Wheel and sdist: built offline with installed tools and `--no-isolation`.
+- Isolated dependency-free wheel install outside the checkout: PASS on Python
+  3.9.20, with package-index access disabled. Doctor, demo, evaluation, list,
+  show, diagnose, anonymize, feedback template and replay pass. The installed
+  corpus has 14 cases; the checkout additionally has two saved regression cases.
+- No claim of testing every Python/Node version or arbitrary provider behavior.
+
+**Full requested boundary checklist: FAIL on the documented P2 completeness
+gaps (explicit truncation and header-only retry evidence).** Do not relabel these
+as fully passing. **Release-blocking execution/RCA boundary safety: PASS** for
+the tested cases after the two P1 repairs. **Concurrency isolation: PASS.
+Privacy regression: PASS. RCA infrastructure safety: PASS.**
+
+**Ready to move to limited external developer validation: YES**, with the P2
+limitations disclosed, not a general release/completeness claim. No remaining
+P1 blocker was found in this pass. Real-user usefulness remains unknown; these
+controlled checks cannot answer whether developers will trust or reuse it.
+
+Git scope: two product files and this report modified; one new boundary test
+file. Nothing staged, committed, pushed, published or deployed. Generated
+traces, build outputs and private working files remain ignored. No package
+reorganization, feature, UI, service, new RCA category or threshold tuning.
