@@ -33,13 +33,13 @@ _CREDENTIAL_PATTERNS = {
     'authorization': re.compile(r'''(?i)\b(?:proxy[-_ ]?)?authorization["']?[ \t]*[:=][ \t]*(?:"[^"\n]*"|'[^'\n]*'|[^\s;}][^\r\n;}]*)'''),
     'bearer': re.compile(r'(?i)\bBearer[ \t]+[A-Za-z0-9._~+/*=\-\u2022\u2026]+'),
     'api_key': re.compile(r'\b(?:sk-(?:[A-Za-z0-9_*.\-\u2022\u2026]|\[(?:REDACTED|MASKED)\])+|gh[pousr]_[A-Za-z0-9_*.-]{12,}|github_pat_[A-Za-z0-9_*.-]+|AKIA[A-Z0-9*]{16}|xox[baprs]-[A-Za-z0-9*.-]{10,})'),
-    'url_credentials': re.compile(r'(?i)[a-z][a-z0-9+.-]*://[^\s/@:]+:[^\s/@]+@'),
+    'url_credentials': re.compile(r'(?i)(?<![a-z0-9+.-])[a-z][a-z0-9+.-]*://[^\s/@:]+:[^\s/@]+@'),
     'private_key': re.compile(r'-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----[\s\S]*?(?:-----END (?:RSA |EC |OPENSSH )?PRIVATE KEY-----|$)'),
     'credential_hint': re.compile(r'(?i)(\b' + _HINT_LABEL + r'(?:[ \t]+(?:provided|hint|prefix|suffix|value))?[ \t]*[:=][ \t]*|\b(?:' + _HINT_LABEL + r'|key)[ \t]+(?:ending in|ending with|ends with|starting with|starts with|begins with|prefix|suffix|hint)[ \t]+(?:is[ \t]+)?)(' + _HINT_VALUE + ')'),
 }
 _PATTERNS = {
     **_CREDENTIAL_PATTERNS,
-    'email': re.compile(r'[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}'),
+    'email': re.compile(r'(?<![A-Za-z0-9._%+-])[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}'),
     'ssn': re.compile(r'\b\d{3}-\d{2}-\d{4}\b'),
     'phone': re.compile(r'(?:\+?1[-.\s]?)?\(?\d{3}\)?[-.\s]\d{3}[-.\s]\d{4}\b'),
     'card': re.compile(r'\b(?:\d[ -]?){15,16}\b'),
