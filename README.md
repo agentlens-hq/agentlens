@@ -38,17 +38,14 @@ customer run. See the [text output](#inspect-and-diagnose) or run
 
 ## Install and Try
 
-Start with the current source for beta testing. This checkout is **0.1.3**;
-[PyPI](https://pypi.org/project/runlens/) lists **0.1.2** as of September 16, 2026.
-`pip install runlens` installs the published release, not necessarily the behavior
-documented here. The Python package is named `runlens`; the import and CLI are `agentlens`.
+The **0.1.3 beta** is available on [PyPI](https://pypi.org/project/runlens/).
+The Python package is named `runlens`; the import and CLI are `agentlens`.
+Start in a fresh virtual environment:
 
 ```bash
-git clone https://github.com/agentlens-hq/agentlens.git
-cd agentlens
 python -m venv .venv
 source .venv/bin/activate
-python -m pip install -e ".[openai,anthropic]"
+pip install runlens
 agentlens doctor
 agentlens demo --no-browser
 ```
@@ -60,10 +57,22 @@ The demo captures a simulated broken agent, saves its trace, and prints a diagno
 It never calls a provider, even when API keys are set. No API key or account is
 needed for this demo. Doctor checks local mechanics, not real-world diagnosis quality.
 
+Already installed an older version? Run `python -m pip install --upgrade runlens`.
+For source development instead, clone the repository and install with
+`python -m pip install -e ".[openai,anthropic]"`.
+
 ## Capture a Run
 
 Two lines enable instrumentation; a decorator groups and **saves** the run.
 Calling `init()` alone does not persist a grouped run.
+
+The base package includes the offline CLI, not a provider SDK. For the OpenAI
+example below, install the extra first and configure your own `OPENAI_API_KEY`
+outside the source file. Anthropic users can install `runlens[anthropic]` instead.
+
+```bash
+python -m pip install "runlens[openai]"
+```
 
 ```python
 import agentlens
